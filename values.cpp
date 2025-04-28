@@ -1,446 +1,469 @@
 // values.cpp
 #include "values.h"
-#include <regex>
+#include "exec.h"  // 添加包含TemplateFn的头文件
 #include <sstream>
 #include <iomanip>
 #include <stdexcept>
+#include <algorithm>
+#include <cctype>
+#include <fstream>
 
 namespace template_engine {
 
-// Values构造函数实现
-Values::Values(const ValueType& value) : value_(value) {}
-Values::Values(ValueType&& value) : value_(std::move(value)) {}
+// 构造函数实现
+Values::Values() : type_(Null), functionValue_(NULL) {}
 
-// 创建辅助函数实现
-std::shared_ptr<Values> Values::MakeMap() {
-    return std::make_shared<Values>(std::map<std::string, std::shared_ptr<Values>>{});
+Values::Values(bool b) : type_(Bool), boolValue_(b), functionValue_(NULL) {}
+
+Values::Values(double n) : type_(Number), numberValue_(n), functionValue_(NULL) {}
+
+Values::Values(const std::string& s) : type_(String), stringValue_(s), functionValue_(NULL) {}
+
+Values::Values(const std::vector<Values*>& l) : type_(List), functionValue_(NULL) {
+    listValue_.reserve(l.size());
+    for (std::vector<Values*>::const_iterator it = l.begin(); it != l.end(); ++it) {
+        if (*it) {
+            listValue_.push_back(new Values(*(*it))); // 手动调用拷贝构造
+        } else {
+            listValue_.push_back(NULL);
+        }
+    }
 }
 
-std::shared_ptr<Values> Values::MakeList() {
-    return std::make_shared<Values>(std::vector<std::shared_ptr<Values>>{});
+Values::Values(const std::map<std::string, Values*>& m) : type_(Map), functionValue_(NULL) {
+    for (std::map<std::string, Values*>::const_iterator it = m.begin(); it != m.end(); ++it) {
+        if (it->second) {
+            mapValue_[it->first] = new Values(*(it->second)); // 手动调用拷贝构造
+        } else {
+            mapValue_[it->first] = NULL;
+        }
+    }
 }
 
-std::shared_ptr<Values> Values::MakeString(const std::string& s) {
-    return std::make_shared<Values>(s);
+// 添加函数构造函数
+Values::Values(TemplateFn* fn) : type_(Function), functionValue_(fn) {}
+
+// 析构函数
+Values::~Values() {
+    clearResources();
 }
 
-std::shared_ptr<Values> Values::MakeNumber(double n) {
-    return std::make_shared<Values>(n);
+// 恢复：拷贝构造函数执行手动深拷贝
+Values::Values(const Values& other) : type_(other.type_), 
+    boolValue_(other.boolValue_), 
+    numberValue_(other.numberValue_), 
+    stringValue_(other.stringValue_),
+    functionValue_(other.functionValue_) {
+    // 手动深拷贝列表
+    if (other.type_ == List) {
+        listValue_.reserve(other.listValue_.size());
+        for (std::vector<Values*>::const_iterator it = other.listValue_.begin(); it != other.listValue_.end(); ++it) {
+            if (*it) {
+                listValue_.push_back(new Values(*(*it)));
+            } else {
+                listValue_.push_back(NULL);
+            }
+        }
+    }
+    // 手动深拷贝映射
+    else if (other.type_ == Map) {
+        for (std::map<std::string, Values*>::const_iterator it = other.mapValue_.begin(); it != other.mapValue_.end(); ++it) {
+            if (it->second) {
+                mapValue_[it->first] = new Values(*(it->second));
+            } else {
+                mapValue_[it->first] = NULL;
+            }
+        }
+    }
 }
 
-std::shared_ptr<Values> Values::MakeBool(bool b) {
-    return std::make_shared<Values>(b);
+// 恢复：赋值运算符使用 copy-and-swap (依赖正确的拷贝构造和析构)
+Values& Values::operator=(const Values& other) {
+    if (this != &other) {
+        Values temp(other); // 调用拷贝构造函数进行深拷贝
+        std::swap(type_, temp.type_);
+        std::swap(boolValue_, temp.boolValue_);
+        std::swap(numberValue_, temp.numberValue_);
+        std::swap(stringValue_, temp.stringValue_);
+        std::swap(listValue_, temp.listValue_);
+        std::swap(mapValue_, temp.mapValue_);
+        std::swap(functionValue_, temp.functionValue_);
+    }
+    return *this;
 }
 
-std::shared_ptr<Values> Values::MakeNull() {
-    return std::make_shared<Values>(nullptr);
+// 清理资源
+void Values::clearResources() {
+    // 释放列表中的所有元素
+    if (type_ == List) {
+        for (std::vector<Values*>::iterator it = listValue_.begin(); it != listValue_.end(); ++it) {
+            delete *it;
+        }
+        listValue_.clear();
+    }
+    
+    // 释放映射中的所有元素
+    if (type_ == Map) {
+        for (std::map<std::string, Values*>::iterator it = mapValue_.begin(); it != mapValue_.end(); ++it) {
+            delete it->second;
+        }
+        mapValue_.clear();
+    }
+    
+    // 函数值不需要释放，它由外部管理
+}
+
+// 工厂方法实现
+Values* Values::MakeNull() {
+    return new Values();
+}
+
+Values* Values::MakeBool(bool b) {
+    return new Values(b);
+}
+
+Values* Values::MakeNumber(double n) {
+    return new Values(n);
+}
+
+Values* Values::MakeString(const std::string& s) {
+    return new Values(s);
+}
+
+Values* Values::MakeList(const std::vector<Values*>& l) {
+    return new Values(l);
+}
+
+Values* Values::MakeMap(const std::map<std::string, Values*>& m) {
+    return new Values(m);
+}
+
+// 添加函数工厂方法
+Values* Values::MakeFunction(TemplateFn* fn) {
+    return new Values(fn);
 }
 
 // 类型检查实现
-bool Values::IsMap() const {
-    return std::holds_alternative<std::map<std::string, std::shared_ptr<Values>>>(value_);
-}
+bool Values::IsNull() const { return type_ == Null; }
+bool Values::IsBool() const { return type_ == Bool; }
+bool Values::IsNumber() const { return type_ == Number; }
+bool Values::IsString() const { return type_ == String; }
+bool Values::IsList() const { return type_ == List; }
+bool Values::IsMap() const { return type_ == Map; }
+bool Values::IsFunction() const { return type_ == Function; }
 
-bool Values::IsList() const {
-    return std::holds_alternative<std::vector<std::shared_ptr<Values>>>(value_);
-}
-
-bool Values::IsString() const {
-    return std::holds_alternative<std::string>(value_);
-}
-
-bool Values::IsNumber() const {
-    return std::holds_alternative<double>(value_) || 
-           std::holds_alternative<int64_t>(value_);
-}
-
-bool Values::IsBool() const {
-    return std::holds_alternative<bool>(value_);
-}
-
-bool Values::IsNull() const {
-    return std::holds_alternative<std::nullptr_t>(value_);
-}
-
-// 访问器实现
-std::map<std::string, std::shared_ptr<Values>>& Values::AsMap() {
-    if (!IsMap()) {
-        throw ValueError(ValueErrorType::TypeError, "Value is not a map");
-    }
-    return std::get<std::map<std::string, std::shared_ptr<Values>>>(value_);
-}
-
-const std::map<std::string, std::shared_ptr<Values>>& Values::AsMap() const {
-    if (!IsMap()) {
-        throw ValueError(ValueErrorType::TypeError, "Value is not a map");
-    }
-    return std::get<std::map<std::string, std::shared_ptr<Values>>>(value_);
-}
-
-std::vector<std::shared_ptr<Values>>& Values::AsList() {
-    if (!IsList()) {
-        throw ValueError(ValueErrorType::TypeError, "Value is not a list");
-    }
-    return std::get<std::vector<std::shared_ptr<Values>>>(value_);
-}
-
-const std::vector<std::shared_ptr<Values>>& Values::AsList() const {
-    if (!IsList()) {
-        throw ValueError(ValueErrorType::TypeError, "Value is not a list");
-    }
-    return std::get<std::vector<std::shared_ptr<Values>>>(value_);
-}
-
-std::string& Values::AsString() {
-    if (!IsString()) {
-        throw ValueError(ValueErrorType::TypeError, "Value is not a string");
-    }
-    return std::get<std::string>(value_);
-}
-
-const std::string& Values::AsString() const {
-    if (!IsString()) {
-        throw ValueError(ValueErrorType::TypeError, "Value is not a string");
-    }
-    return std::get<std::string>(value_);
+// 值访问实现
+bool Values::AsBool() const {
+    if (!IsBool()) throw ValueError(TypeError, "not a bool");
+    return boolValue_;
 }
 
 double Values::AsNumber() const {
-    if (std::holds_alternative<double>(value_)) {
-        return std::get<double>(value_);
-    } else if (std::holds_alternative<int64_t>(value_)) {
-        return static_cast<double>(std::get<int64_t>(value_));
-    }
-    throw ValueError(ValueErrorType::TypeError, "Value is not a number");
+    if (!IsNumber()) throw ValueError(TypeError, "not a number");
+    return numberValue_;
 }
 
-bool Values::AsBool() const {
-    if (!IsBool()) {
-        throw ValueError(ValueErrorType::TypeError, "Value is not a boolean");
-    }
-    return std::get<bool>(value_);
+const std::string& Values::AsString() const {
+    if (!IsString()) throw ValueError(TypeError, "not a string");
+    return stringValue_;
 }
 
-// 分割路径
+const std::vector<Values*>& Values::AsList() const {
+    if (!IsList()) throw ValueError(TypeError, "not a list");
+    return listValue_;
+}
+
+// 常量版本的AsMap()实现
+const std::map<std::string, Values*>& Values::AsMap() const {
+    if (!IsMap()) throw ValueError(TypeError, "not a map");
+    return mapValue_;
+}
+
+// 添加非常量版本的AsMap()实现
+std::map<std::string, Values*>& Values::AsMap() {
+    if (!IsMap()) throw ValueError(TypeError, "not a map");
+    return mapValue_;
+}
+
+// 添加函数访问方法
+TemplateFn* Values::AsFunction() const {
+    if (!IsFunction()) throw ValueError(TypeError, "not a function");
+    return functionValue_;
+}
+
+// 分割路径为段
 std::vector<std::string> Values::SplitPath(const std::string& path) {
     std::vector<std::string> parts;
+    std::string::size_type start = 0;
+    std::string::size_type end = path.find('.');
     
-    size_t start = 0;
-    size_t pos = 0;
-    while ((pos = path.find('.', start)) != std::string::npos) {
-        if (pos > start) {
-            parts.push_back(path.substr(start, pos - start));
-        }
-        start = pos + 1;
+    while (end != std::string::npos) {
+        parts.push_back(path.substr(start, end - start));
+        start = end + 1;
+        end = path.find('.', start);
     }
-    
-    if (start < path.length()) {
-        parts.push_back(path.substr(start));
-    }
-    
+    parts.push_back(path.substr(start));
     return parts;
 }
 
-// Table实现 - 获取嵌套表
-// Table实现 - 获取嵌套表
-std::shared_ptr<Values> Values::Table(const std::string& path) const {
-    auto parts = SplitPath(path);
-    auto current = const_cast<Values*>(this);
-    
-    for (const auto& part : parts) {
-        if (!current->IsMap()) {
-            std::cerr << "错误: 尝试在非Map类型的值中查找表: " << part << std::endl;
-            throw ValueError(ValueErrorType::NoTable, 
-                           "Table lookup in non-map type at: " + part);
-        }
-        
-        auto& table = current->AsMap();
-        auto it = table.find(part);
-        if (it == table.end()) {
-            std::cerr << "错误: 找不到表: " << part << std::endl;
-            throw ValueError(ValueErrorType::NoTable, 
-                           "Table not found: " + part);
-        }
-        
-        if (!it->second) {
-            std::cerr << "错误: 路径上的值为空: " << part << std::endl;
-            throw ValueError(ValueErrorType::NoTable, 
-                           "Null value in path: " + part);
-        }
-        
-        current = it->second.get();
-    }
-    
-    return std::shared_ptr<Values>(current->DeepCopy());
-}
-
-// 按路径获取值
-// std::optional<std::shared_ptr<Values>> Values::PathValue(const std::string& path) const {
-//     if (path.empty()) {
-//         return std::nullopt;
-//     }
-    
-//     auto parts = SplitPath(path);
-//     if (parts.empty()) {
-//         return std::nullopt;
-//     }
-    
-//     // 获取最终键
-//     std::string key = parts.back();
-//     parts.pop_back();
-    
-//     try {
-//         // 获取父表
-//         const Values* parent = this;
-//         if (!parts.empty()) {
-//             std::string parentPath;
-//             for (size_t i = 0; i < parts.size(); ++i) {
-//                 if (i > 0) parentPath += ".";
-//                 parentPath += parts[i];
-//             }
-//             parent = Table(parentPath).get();
-//         }
-        
-//         if (!parent->IsMap()) {
-//             return std::nullopt;
-//         }
-        
-//         const auto& parentMap = parent->AsMap();
-//         auto it = parentMap.find(key);
-//         if (it != parentMap.end()) {
-//             return it->second->DeepCopy();
-//         }
-//     } catch (const ValueError&) {
-//         // 如果路径上任何部分找不到，则返回空
-//     }
-    
-//     return std::nullopt;
-// }
-
-std::optional<std::shared_ptr<Values>> Values::PathValue(const std::string& path) const {
-    std::cout << "PathValue: 尝试访问路径 " << path << std::endl;
-    
-    // 分割路径
+// 使用路径访问值
+Values* Values::Table(const std::string& path) const {
     std::vector<std::string> parts = SplitPath(path);
+    const Values* current = this;
     
-    if (parts.empty()) {
-        std::cout << "PathValue: 空路径" << std::endl;
-        return std::nullopt;
-    }
-    
-    std::cout << "PathValue: 路径分割为 " << parts.size() << " 个部分" << std::endl;
-    for (const auto& part : parts) {
-        std::cout << "  部分: " << part << std::endl;
-    }
-    
-    // 从当前值开始遍历路径
-    std::shared_ptr<Values> current = const_cast<Values*>(this)->shared_from_this();
-    
-    for (size_t i = 0; i < parts.size(); ++i) {
-        if (!current || !current->IsMap()) {
-            std::cout << "PathValue: " << parts[i] << " 不是map或为空" << std::endl;
-            return std::nullopt;
+    for (std::vector<std::string>::const_iterator it = parts.begin(); it != parts.end(); ++it) {
+        if (!current->IsMap()) {
+            throw ValueError(NoTable, "not a table: " + *it);
         }
         
-        const auto& map = current->AsMap();
-        auto it = map.find(parts[i]);
-        if (it == map.end()) {
-            std::cout << "PathValue: 未找到键 " << parts[i] << std::endl;
-            return std::nullopt;
+        const std::map<std::string, Values*>& map = current->AsMap();
+        std::map<std::string, Values*>::const_iterator mapIt = map.find(*it);
+        if (mapIt == map.end() || mapIt->second == NULL) {
+            throw ValueError(NoValue, "no value for key: " + *it);
         }
         
-        current = it->second;
-        std::cout << "PathValue: 找到部分 " << parts[i] << std::endl;
+        current = mapIt->second;
     }
     
-    return current;
+    return new Values(*current);
 }
 
-// 判断是否包含键
+
+
+// 判断是否包含特定键
 bool Values::Contains(const std::string& key) const {
     if (!IsMap()) {
         return false;
     }
-    const auto& map = AsMap();
-    return map.find(key) != map.end();
+    const std::map<std::string, Values*>& map = AsMap();
+    return map.find(key) != map.end() && map.find(key)->second != NULL;
 }
 
-// 操作符[]实现
-std::shared_ptr<Values>& Values::operator[](const std::string& key) {
+// 类似数组访问
+Values*& Values::operator[](const std::string& key) {
     if (!IsMap()) {
-        value_ = std::map<std::string, std::shared_ptr<Values>>{};
+        throw ValueError(TypeError, "not a map");
     }
-    auto& map = AsMap();
-    if (map.find(key) == map.end()) {
-        map[key] = MakeNull();
-    }
-    return map[key];
+    return mapValue_[key];
 }
 
-std::shared_ptr<Values>& Values::operator[](size_t index) {
+Values*& Values::operator[](size_t index) {
     if (!IsList()) {
-        value_ = std::vector<std::shared_ptr<Values>>{};
+        throw ValueError(TypeError, "not a list");
     }
-    auto& list = AsList();
-    if (index >= list.size()) {
-        list.resize(index + 1);
+    if (index >= listValue_.size()) {
+        throw ValueError(NoValue, "index out of range");
     }
-    if (!list[index]) {
-        list[index] = MakeNull();
-    }
-    return list[index];
+    return listValue_[index];
 }
 
-// 深拷贝实现
-std::shared_ptr<Values> Values::DeepCopy() const {
-    if (IsMap()) {
-        auto result = MakeMap();
-        for (const auto& [key, value] : AsMap()) {
-            if (value) {
-                result->AsMap()[key] = value->DeepCopy();
-            } else {
-                result->AsMap()[key] = nullptr;
-            }
-        }
-        return result;
-    } else if (IsList()) {
-        auto result = MakeList();
-        auto& resultList = result->AsList();
-        for (const auto& item : AsList()) {
-            if (item) {
-                resultList.push_back(item->DeepCopy());
-            } else {
-                resultList.push_back(nullptr);
-            }
-        }
-        return result;
-    } else {
-        // 基本类型可以直接创建新对象
-        return std::make_shared<Values>(value_);
-    }
-}
-
-// 输出调试信息
+// 调试输出
 void Values::Print(std::ostream& os, int indent) const {
-    std::string padding(indent * 2, ' ');
-
+    std::string spaces(indent, ' ');
+    
     if (IsNull()) {
-        os << padding << "null" << std::endl;
+        os << spaces << "null" << std::endl;
     } else if (IsBool()) {
-        os << padding << (AsBool() ? "true" : "false") << std::endl;
+        os << spaces << (AsBool() ? "true" : "false") << std::endl;
     } else if (IsNumber()) {
-        os << padding << AsNumber() << std::endl;
+        os << spaces << AsNumber() << std::endl;
     } else if (IsString()) {
-        os << padding << "\"" << AsString() << "\"" << std::endl;
-    } else if (IsMap()) {
-        os << padding << "{" << std::endl;
-        printMap(AsMap(), os, indent + 1);
-        os << padding << "}" << std::endl;
+        os << spaces << "\"" << AsString() << "\"" << std::endl;
     } else if (IsList()) {
-        os << padding << "[" << std::endl;
-        printList(AsList(), os, indent + 1);
-        os << padding << "]" << std::endl;
+        os << spaces << "[" << std::endl;
+        const std::vector<Values*>& list = AsList();
+        for (std::vector<Values*>::const_iterator it = list.begin(); it != list.end(); ++it) {
+            if (*it) {
+                (*it)->Print(os, indent + 2);
+            } else {
+                os << spaces << "  null" << std::endl;
+            }
+        }
+        os << spaces << "]" << std::endl;
+    } else if (IsMap()) {
+        os << spaces << "{" << std::endl;
+        const std::map<std::string, Values*>& map = AsMap();
+        for (std::map<std::string, Values*>::const_iterator it = map.begin(); it != map.end(); ++it) {
+            os << spaces << "  " << it->first << ": ";
+            if (it->second) {
+                it->second->Print(os, indent + 2);
+            } else {
+                os << "null" << std::endl;
+            }
+        }
+        os << spaces << "}" << std::endl;
     }
 }
 
-void Values::printMap(const std::map<std::string, std::shared_ptr<Values>>& map, 
-                     std::ostream& os, int indent) const {
-    std::string padding(indent * 2, ' ');
-    
-    for (const auto& [key, value] : map) {
-        os << padding << "\"" << key << "\": ";
-        if (value) {
-            if (value->IsMap() || value->IsList()) {
-                os << std::endl;
-                value->Print(os, indent + 1);
-            } else {
-                value->Print(os, 0);
-            }
+// 序列化为字符串
+std::string Values::ToString() const {
+    std::ostringstream oss;
+    if (IsNull()) {
+        oss << "null";
+    } else if (IsBool()) {
+        oss << (AsBool() ? "true" : "false");
+    } else if (IsNumber()) {
+        oss << AsNumber();
+    } else if (IsString()) {
+        // 直接输出字符串内容，不添加引号
+        oss << AsString();
+    } else if (IsList()) {
+        // 列表的简化表示
+        const std::vector<Values*>& list = AsList();
+        if (list.empty()) {
+            oss << "[]";
         } else {
-            os << "null" << std::endl;
+            oss << "[";
+            for (size_t i = 0; i < list.size() && i < 3; ++i) {
+                if (i > 0) oss << ", ";
+                if (list[i]) {
+                    oss << list[i]->ToString();
+                } else {
+                    oss << "null";
+                }
+            }
+            if (list.size() > 3) {
+                oss << ", ...";
+            }
+            oss << "]";
+        }
+    } else if (IsMap()) {
+        // Map的简化表示
+        const std::map<std::string, Values*>& map = AsMap();
+        if (map.empty()) {
+            oss << "{}";
+        } else {
+            // 检查这是否是一个简单的键值对象，并尝试输出最有意义的值
+            if (map.size() == 1) {
+                // 如果只有一个值，直接输出该值
+                oss << map.begin()->second->ToString();
+            } else {
+                // 输出所有键
+                oss << "{";
+                bool first = true;
+                for (std::map<std::string, Values*>::const_iterator it = map.begin(); it != map.end(); ++it) {
+                    if (!first) oss << " ";
+                    first = false;
+                    oss << it->first;
+                }
+                oss << "}";
+            }
         }
     }
+    return oss.str();
 }
 
-void Values::printList(const std::vector<std::shared_ptr<Values>>& list, 
-                      std::ostream& os, int indent) const {
-    std::string padding(indent * 2, ' ');
-    
-    for (const auto& item : list) {
-        os << padding;
-        if (item) {
-            if (item->IsMap() || item->IsList()) {
-                os << std::endl;
-                item->Print(os, indent + 1);
-            } else {
-                item->Print(os, 0);
-            }
-        } else {
-            os << "null" << std::endl;
-        }
+
+// values.cpp 中的 PathValue 方法
+Values* Values::PathValue(const std::string& path) const {
+    if (path.empty()) {
+        return NULL;
     }
+    
+    std::cout << "PathValue: 访问路径 " << path << std::endl;
+    
+    // 分割路径
+    std::vector<std::string> parts = SplitPath(path);
+    std::cout << "  路径分割为 " << parts.size() << " 部分" << std::endl;
+    
+    // 遍历路径
+    const Values* current = this;
+    
+    for (size_t i = 0; i < parts.size(); ++i) {
+        std::cout << "    查找部分 " << i+1 << ": " << parts[i] << std::endl;
+        
+        if (!current || !current->IsMap()) {
+            std::cout << "    当前节点不是map或为空" << std::endl;
+            return NULL;
+        }
+        
+        const std::map<std::string, Values*>& map = current->AsMap();
+        std::map<std::string, Values*>::const_iterator it = map.find(parts[i]);
+        
+        if (it == map.end() || !it->second) {
+            std::cout << "    未找到键 " << parts[i] << std::endl;
+            return NULL;
+        }
+        
+        current = it->second;
+        std::cout << "    找到部分 " << parts[i] << ", 类型: " << current->TypeName() << std::endl;
+    }
+    
+    // 创建结果的副本以避免所有权问题
+    if (current) {
+        return new Values(*current);
+    }
+    
+    return NULL;
 }
 
-// YAML序列化和反序列化 - 这里只是一个简化实现，实际使用应依赖yaml-cpp库
+
+// 序列化
 std::string Values::ToYAML() const {
-    std::stringstream ss;
-    Print(ss, 0);
-    return ss.str();
+    std::ostringstream oss;
+    Print(oss, 0);
+    return oss.str();
 }
 
 bool Values::Encode(std::ostream& out) const {
     try {
-        out << ToYAML();
+        Print(out, 0);
         return true;
     } catch (const std::exception&) {
         return false;
     }
 }
 
-// 简化版的FromYAML - 实际应该使用yaml-cpp库
-std::shared_ptr<Values> Values::FromYAML(const std::string& yamlContent) {
-    // 这里是极其简化的YAML解析器，仅作示范
-    // 实际实现应该使用yaml-cpp库
-    
-    auto result = MakeMap();
-    std::stringstream ss(yamlContent);
+// 深拷贝实现
+Values* Values::DeepCopy() const {
+    return new Values(*this); // 利用拷贝构造函数
+}
+
+// 反序列化
+Values* Values::FromYAML(const std::string& yamlContent) {
+    // 简化版的YAML解析器
+    Values* result = MakeMap(std::map<std::string, Values*>());
+    std::istringstream iss(yamlContent);
     std::string line;
     
-    while (std::getline(ss, line)) {
+    while (std::getline(iss, line)) {
         // 去除前后空白
-        line = std::regex_replace(line, std::regex("^\\s+|\\s+$"), "");
+        line.erase(0, line.find_first_not_of(" \t"));
+        line.erase(line.find_last_not_of(" \t") + 1);
         if (line.empty() || line[0] == '#') continue;
         
         // 寻找 key: value 模式
-        auto pos = line.find(':');
+        std::string::size_type pos = line.find(':');
         if (pos != std::string::npos) {
             std::string key = line.substr(0, pos);
             std::string value = line.substr(pos + 1);
             
             // 去除空白
-            key = std::regex_replace(key, std::regex("^\\s+|\\s+$"), "");
-            value = std::regex_replace(value, std::regex("^\\s+|\\s+$"), "");
+            key.erase(0, key.find_first_not_of(" \t"));
+            key.erase(key.find_last_not_of(" \t") + 1);
+            value.erase(0, value.find_first_not_of(" \t"));
+            value.erase(value.find_last_not_of(" \t") + 1);
             
             if (!key.empty()) {
                 if (value.empty()) {
                     // 空映射或空列表
-                    result->AsMap()[key] = MakeMap();
+                    result->mapValue_[key] = MakeMap(std::map<std::string, Values*>());
                 } else if (value == "true") {
-                    result->AsMap()[key] = MakeBool(true);
+                    result->mapValue_[key] = MakeBool(true);
                 } else if (value == "false") {
-                    result->AsMap()[key] = MakeBool(false);
+                    result->mapValue_[key] = MakeBool(false);
                 } else if (value == "null") {
-                    result->AsMap()[key] = MakeNull();
-                } else if (std::regex_match(value, std::regex("^-?\\d+(\\.\\d+)?$"))) {
+                    result->mapValue_[key] = MakeNull();
+                } else if (value.find_first_not_of("-0123456789.") == std::string::npos) {
                     // 数字
-                    result->AsMap()[key] = MakeNumber(std::stod(value));
+                    result->mapValue_[key] = MakeNumber(std::atof(value.c_str()));
                 } else {
                     // 字符串 - 去掉可能的引号
-                    if ((value.front() == '"' && value.back() == '"') ||
-                        (value.front() == '\'' && value.back() == '\'')) {
+                    if ((value.size() > 0 && value[0] == '"' && value.size() > 1 && value[value.size()-1] == '"') ||
+                        (value.size() > 0 && value[0] == '\'' && value.size() > 1 && value[value.size()-1] == '\'')) {
                         value = value.substr(1, value.length() - 2);
                     }
-                    result->AsMap()[key] = MakeString(value);
+                    result->mapValue_[key] = MakeString(value);
                 }
             }
         }
@@ -449,10 +472,10 @@ std::shared_ptr<Values> Values::FromYAML(const std::string& yamlContent) {
     return result;
 }
 
-std::shared_ptr<Values> Values::FromYAMLFile(const std::string& filename) {
+Values* Values::FromYAMLFile(const std::string& filename) {
     std::ifstream file(filename);
     if (!file.is_open()) {
-        throw ValueError(ValueErrorType::NoTable, "Could not open file: " + filename);
+        throw ValueError(NoTable, "Could not open file: " + filename);
     }
     
     std::stringstream buffer;
@@ -460,86 +483,312 @@ std::shared_ptr<Values> Values::FromYAMLFile(const std::string& filename) {
     return FromYAML(buffer.str());
 }
 
+
+
+
+
+
+
+
+
 // 合并值
-std::shared_ptr<Values> CoalesceValues(const std::shared_ptr<Values>& base, 
-                                       const std::shared_ptr<Values>& overlay) {
-    // 如果base为空，返回overlay的副本
-    if (!base || base->IsNull()) {
-        return overlay ? overlay->DeepCopy() : Values::MakeNull();
+Values* CoalesceValues(const Values* base, const Values* overlay) {
+    if (!base) {
+        return overlay ? new Values(*overlay) : NULL;
+    }
+    if (!overlay) {
+        return new Values(*base);
     }
     
-    // 如果overlay为空，返回base的副本
-    if (!overlay || overlay->IsNull()) {
-        return base->DeepCopy();
+    if (!base->IsMap() || !overlay->IsMap()) {
+        return new Values(*overlay);
     }
     
-    // 如果两者都是map，递归合并
-    if (base->IsMap() && overlay->IsMap()) {
-        auto result = Values::MakeMap();
-        
-        // 首先复制base的所有键
-        for (const auto& [key, value] : base->AsMap()) {
-            result->AsMap()[key] = value->DeepCopy();
+    std::map<std::string, Values*> result;
+    const std::map<std::string, Values*>& baseMap = base->AsMap();
+    const std::map<std::string, Values*>& overlayMap = overlay->AsMap();
+    
+    // 复制base中的所有值
+    for (std::map<std::string, Values*>::const_iterator it = baseMap.begin(); it != baseMap.end(); ++it) {
+        if (it->second) {
+            result[it->first] = new Values(*(it->second));
+        } else {
+            result[it->first] = NULL;
         }
-        
-        // 然后合并overlay的键
-        for (const auto& [key, overlayValue] : overlay->AsMap()) {
-            auto baseIt = base->AsMap().find(key);
-            if (baseIt != base->AsMap().end()) {
-                // 键存在于base中，需要递归合并
-                result->AsMap()[key] = CoalesceValues(baseIt->second, overlayValue);
+    }
+    
+    // 合并overlay中的值
+    for (std::map<std::string, Values*>::const_iterator it = overlayMap.begin(); it != overlayMap.end(); ++it) {
+        std::map<std::string, Values*>::iterator baseIt = result.find(it->first);
+        if (baseIt != result.end() && baseIt->second && it->second && 
+            baseIt->second->IsMap() && it->second->IsMap()) {
+            // 递归合并map
+            result[it->first] = CoalesceValues(baseIt->second, it->second);
+            delete baseIt->second; // 释放旧的值
+        } else {
+            // 直接覆盖，先删除旧的值
+            if (baseIt != result.end() && baseIt->second) {
+                delete baseIt->second;
+            }
+            
+            // 复制新的值
+            if (it->second) {
+                result[it->first] = new Values(*(it->second));
             } else {
-                // 键不存在于base中，直接复制
-                result->AsMap()[key] = overlayValue->DeepCopy();
+                result[it->first] = NULL;
             }
         }
-        
-        return result;
     }
     
-    // 其他情况，overlay覆盖base
-    return overlay->DeepCopy();
+    return Values::MakeMap(result);
 }
 
+
+
+
+
+
+
+
+
+
 // 准备渲染值
-std::shared_ptr<Values> ToRenderValues(
+Values* ToRenderValues(
     const std::string& chartName,
     const std::string& chartVersion,
-    const std::shared_ptr<Values>& chartValues,
+    const Values* chartValues,
     const RenderOptions& options) {
     
-    // 创建顶层值对象
-    auto topLevel = Values::MakeMap();
+    std::map<std::string, Values*> result;
     
-    // 添加图表元数据
-    auto chart = Values::MakeMap();
-    chart->AsMap()["Name"] = Values::MakeString(chartName);
-    chart->AsMap()["Version"] = Values::MakeString(chartVersion);
-    topLevel->AsMap()["Chart"] = chart;
+    // 添加Chart信息
+    std::map<std::string, Values*> chartMap;
+    chartMap["Name"] = Values::MakeString(chartName);
+    chartMap["Version"] = Values::MakeString(chartVersion);
+    result["Chart"] = Values::MakeMap(chartMap);
     
-    // 添加发布信息
-    auto release = Values::MakeMap();
-    release->AsMap()["Name"] = Values::MakeString(options.name);
-    release->AsMap()["Namespace"] = Values::MakeString(options.nameSpace);
-    release->AsMap()["IsUpgrade"] = Values::MakeBool(options.isUpgrade);
-    release->AsMap()["IsInstall"] = Values::MakeBool(options.isInstall);
-    release->AsMap()["Revision"] = Values::MakeNumber(options.revision);
-    release->AsMap()["Service"] = Values::MakeString("Helm-CPP");
-    topLevel->AsMap()["Release"] = release;
+    // 添加Release信息
+    std::map<std::string, Values*> releaseMap;
+    releaseMap["Name"] = Values::MakeString(options.name);
+    releaseMap["Namespace"] = Values::MakeString(options.nameSpace);
+    releaseMap["Revision"] = Values::MakeNumber(options.revision);
+    releaseMap["IsUpgrade"] = Values::MakeBool(options.isUpgrade);
+    releaseMap["IsInstall"] = Values::MakeBool(options.isInstall);
+    result["Release"] = Values::MakeMap(releaseMap);
     
-    // 添加能力信息（这里简化了，实际Helm有更复杂的Capabilities对象）
-    auto capabilities = Values::MakeMap();
-    auto kubeVersion = Values::MakeMap();
-    kubeVersion->AsMap()["Major"] = Values::MakeString("1");
-    kubeVersion->AsMap()["Minor"] = Values::MakeString("23");
-    capabilities->AsMap()["KubeVersion"] = kubeVersion;
-    topLevel->AsMap()["Capabilities"] = capabilities;
+    // 添加Values
+    if (chartValues) {
+        result["Values"] = new Values(*chartValues);
+    } else {
+        result["Values"] = Values::MakeMap(std::map<std::string, Values*>());
+    }
     
-    // 合并图表值
-    auto values = chartValues ? chartValues->DeepCopy() : Values::MakeMap();
-    topLevel->AsMap()["Values"] = values;
-    
-    return topLevel;
+    return Values::MakeMap(result);
+}
+
+// Implementation for TypeName()
+std::string Values::TypeName() const {
+    switch (type_) {
+        case Null:
+            return "null";
+        case Bool:
+            return "bool";
+        case Number:
+            return "number";
+        case String:
+            return "string";
+        case Map:
+            return "map";
+        case List:
+            return "list";
+        case Function:
+            return "function";
+        default:
+            return "unknown";
+    }
+}
+
+// ================== 简易YAML解析实现（C++98，无第三方库） ==================
+struct SimpleYamlLine {
+    int indent; // 缩进空格数
+    bool isListItem;
+    std::string key;
+    std::string value;
+};
+
+static std::vector<std::string> SplitLines(const std::string& text) {
+    std::vector<std::string> lines;
+    std::string::size_type start = 0, end;
+    while ((end = text.find('\n', start)) != std::string::npos) {
+        lines.push_back(text.substr(start, end - start));
+        start = end + 1;
+    }
+    if (start < text.size()) lines.push_back(text.substr(start));
+    return lines;
+}
+
+static std::vector<SimpleYamlLine> ParseSimpleYamlLines(const std::vector<std::string>& lines) {
+    std::vector<SimpleYamlLine> result;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        const std::string& line = lines[i];
+        if (line.empty()) continue;
+        size_t p = 0;
+        while (p < line.size() && (line[p] == ' ')) ++p;
+        if (p == line.size() || line[p] == '#') continue; // 空行或注释
+        int indent = (int)p;
+        std::string content = line.substr(p);
+        bool isListItem = false;
+        std::string key, value;
+        if (content.size() >= 2 && content[0] == '-' && content[1] == ' ') {
+            isListItem = true;
+            value = content.substr(2);
+        } else {
+            size_t pos = content.find(':');
+            if (pos != std::string::npos) {
+                key = content.substr(0, pos);
+                value = content.substr(pos + 1);
+                if (!value.empty() && value[0] == ' ') value = value.substr(1);
+            }
+        }
+        SimpleYamlLine yl;
+        yl.indent = indent;
+        yl.isListItem = isListItem;
+        yl.key = key;
+        yl.value = value;
+        result.push_back(yl);
+    }
+    return result;
+}
+
+static Values* ParseSimpleYamlScalar(const std::string& value) {
+    if (value == "null" || value == "~") return Values::MakeNull();
+    if (value == "true") return Values::MakeBool(true);
+    if (value == "false") return Values::MakeBool(false);
+    if (!value.empty() && value[0] == '"' && value[value.size()-1] == '"')
+        return Values::MakeString(value.substr(1, value.size()-2));
+    if (!value.empty() && value[0] == '\'' && value[value.size()-1] == '\'')
+        return Values::MakeString(value.substr(1, value.size()-2));
+    // 尝试解析为数字
+    char* endptr = 0;
+    double num = strtod(value.c_str(), &endptr);
+    if (endptr != value.c_str() && *endptr == '\0')
+        return Values::MakeNumber(num);
+    // 默认字符串
+    return Values::MakeString(value);
+}
+
+static Values* ParseSimpleYamlBlock(const std::vector<SimpleYamlLine>& lines, int& idx, int parentIndent) {
+    if (idx >= (int)lines.size()) return Values::MakeNull();
+
+    // 判断是列表还是map
+    if (lines[idx].isListItem) {
+        // 列表
+        std::vector<Values*> list;
+        while (idx < (int)lines.size() && lines[idx].isListItem && lines[idx].indent == parentIndent) {
+            // 判断本行是标量还是map
+            if (!lines[idx].value.empty()) {
+                // 进一步判断 value 是否为 key: value 形式（即 - name: ENV）
+                size_t pos = lines[idx].value.find(':');
+                if (pos != std::string::npos && pos != lines[idx].value.length() - 1) {
+                    // 形如 - name: ENV，解析为map
+                    std::string key = lines[idx].value.substr(0, pos);
+                    std::string value = lines[idx].value.substr(pos + 1);
+                    // 去除空白
+                    key.erase(0, key.find_first_not_of(" \t"));
+                    key.erase(key.find_last_not_of(" \t") + 1);
+                    value.erase(0, value.find_first_not_of(" \t"));
+                    value.erase(value.find_last_not_of(" \t") + 1);
+
+                    std::map<std::string, Values*> map;
+                    map[key] = ParseSimpleYamlScalar(value);
+
+                    // 检查下方是否还有同级缩进的字段，属于同一个map
+                    int itemIndent = lines[idx].indent;
+                    int nextIndent = itemIndent + 2;
+                    ++idx;
+                    while (idx < (int)lines.size() && !lines[idx].isListItem && lines[idx].indent == nextIndent) {
+                        std::string subKey = lines[idx].key;
+                        std::string subValue = lines[idx].value;
+                        if (!subKey.empty()) {
+                            if (!subValue.empty()) {
+                                map[subKey] = ParseSimpleYamlScalar(subValue);
+                                ++idx;
+                            } else {
+                                ++idx;
+                                map[subKey] = ParseSimpleYamlBlock(lines, idx, nextIndent + 2);
+                            }
+                        } else {
+                            ++idx;
+                        }
+                    }
+                    list.push_back(Values::MakeMap(map));
+                } else {
+                    // 普通标量
+                list.push_back(ParseSimpleYamlScalar(lines[idx].value));
+                ++idx;
+                }
+            } else {
+                // 该 list item 没有直接 value，递归解析为 map 或 list
+                ++idx;
+                list.push_back(ParseSimpleYamlBlock(lines, idx, parentIndent + 2));
+            }
+        }
+        return Values::MakeList(list);
+    } else {
+        // map
+        std::map<std::string, Values*> map;
+        while (idx < (int)lines.size() && lines[idx].indent == parentIndent && !lines[idx].isListItem) {
+            std::string key = lines[idx].key;
+            std::string value = lines[idx].value;
+            int curIndent = lines[idx].indent;
+            if (!value.empty()) {
+                // 处理空map/空list
+                if (value == "{}") {
+                    map[key] = Values::MakeMap(std::map<std::string, Values*>());
+                } else if (value == "[]") {
+                    map[key] = Values::MakeList(std::vector<Values*>());
+                } else if (value == "|" || value == ">") {
+                    // 多行字符串
+                    std::string multiLine;
+                    ++idx;
+                    while (idx < (int)lines.size() && lines[idx].indent > curIndent) {
+                        multiLine += lines[idx].value;
+                        multiLine += "\n";
+                        ++idx;
+                    }
+                    map[key] = Values::MakeString(multiLine);
+                    continue;
+                } else {
+                    map[key] = ParseSimpleYamlScalar(value);
+                }
+                ++idx;
+            } else {
+                ++idx;
+                map[key] = ParseSimpleYamlBlock(lines, idx, parentIndent + 2);
+            }
+        }
+        return Values::MakeMap(map);
+    }
+}
+
+Values* ParseSimpleYAML(const std::string& yamlText) {
+    std::vector<std::string> lines = SplitLines(yamlText);
+    std::vector<SimpleYamlLine> parsedLines = ParseSimpleYamlLines(lines);
+    int idx = 0;
+    return ParseSimpleYamlBlock(parsedLines, idx, 0);
+}
+
+Values* ParseSimpleYAMLFile(const std::string& filename) {
+    std::ifstream file(filename.c_str());
+    if (!file.is_open()) {
+        throw ValueError(NoTable, "Could not open file: " + filename);
+    }
+    std::stringstream buffer;
+    std::string line;
+    while (std::getline(file, line)) {
+        buffer << line << "\n";
+    }
+    return ParseSimpleYAML(buffer.str());
 }
 
 } // namespace template_engine

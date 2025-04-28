@@ -5,118 +5,103 @@
 #include <algorithm>
 #include <iostream>
 #include <iomanip>
+#include <cctype>
+#include <cstdio>
+#include <cstring>
 
-// ³£Á¿¶¨Òå
+// Item ç±»æ„é€ å‡½æ•°å®ç°
+Item::Item() : type(ItemError), pos(0), val(""), line(0) {}
+
+Item::Item(ItemType t, Pos p, const std::string& v, int l) 
+    : type(t), pos(p), val(v), line(l) {
+    std::cout << "Token: " << itemTypeToString(t) << " è¡Œ=" << l << " å€¼=\"" << v << "\"" << std::endl;
+}
+
+// å¸¸é‡å®šä¹‰
 const int EOF_RUNE = -1;
 const std::string LEFT_COMMENT = "/*";
 const std::string RIGHT_COMMENT = "*/";
 const std::string SPACE_CHARS = " \t\r\n";
 const char TRIM_MARKER = '-';
-const Pos TRIM_MARKER_LEN = 2;  // ±ê¼Ç¼ÓÇ°ºó¿Õ¸ñ
+const Pos TRIM_MARKER_LEN = 2;  // ä¿®å‰ªæ ‡è®°çš„é•¿åº¦ï¼ˆä¾‹å¦‚ {{- æˆ– -}}ï¼‰
 
-// ÊµÏÖItemµÄtoString·½·¨
+// å°† Item è½¬æ¢ä¸ºå­—ç¬¦ä¸²ä»¥ä¾›è°ƒè¯•
 std::string Item::toString() const {
-    switch (type) {
-        case ItemType::ItemEOF:
-            return "EOF";
-        case ItemType::ItemError:
-            return val;
-        case ItemType::ItemKeyword:
-        case ItemType::ItemBlock:
-        case ItemType::ItemBreak:
-        case ItemType::ItemContinue:
-        case ItemType::ItemDot:
-        case ItemType::ItemDefine:
-        case ItemType::ItemElse:
-        case ItemType::ItemEnd:
-        case ItemType::ItemIf:
-        case ItemType::ItemNil:
-        case ItemType::ItemRange:
-        case ItemType::ItemTemplate:
-        case ItemType::ItemWith:
-            return "<" + val + ">";
-        default:
-            if (val.length() > 10) {
-                return "\"" + val.substr(0, 10) + "\"...";
-            }
-            return "\"" + val + "\"";
-    }
+    std::ostringstream oss;
+    oss << itemTypeToString(type) << "(" << val << ")";
+    return oss.str();
 }
 
-// ¹¹½¨¹Ø¼ü×ÖÓ³Éä
-std::unordered_map<std::string, ItemType> buildKeywordMap() {
-    std::unordered_map<std::string, ItemType> keyMap;
-    keyMap["."] = ItemType::ItemDot;
-    keyMap["block"] = ItemType::ItemBlock;
-    keyMap["break"] = ItemType::ItemBreak;
-    keyMap["continue"] = ItemType::ItemContinue;
-    keyMap["define"] = ItemType::ItemDefine;
-    keyMap["else"] = ItemType::ItemElse;
-    keyMap["end"] = ItemType::ItemEnd;
-    keyMap["if"] = ItemType::ItemIf;
-    keyMap["range"] = ItemType::ItemRange;
-    keyMap["nil"] = ItemType::ItemNil;
-    keyMap["template"] = ItemType::ItemTemplate;
-    keyMap["with"] = ItemType::ItemWith;
-    return keyMap;
+// æ„å»ºå…³é”®å­—æ˜ å°„
+std::map<std::string, ItemType> buildKeywordMap() {
+    std::map<std::string, ItemType> m;
+    m["block"] = ItemBlock;
+    m["break"] = ItemBreak;
+    m["continue"] = ItemContinue;
+    m["define"] = ItemDefine;
+    m["else"] = ItemElse;
+    m["end"] = ItemEnd;
+    m["if"] = ItemIf;
+    m["nil"] = ItemNil;
+    m["range"] = ItemRange;
+    m["template"] = ItemTemplate;
+    m["with"] = ItemWith;
+    return m;
 }
 
-// ¹¤¾ßº¯ÊıÊµÏÖ
+// è¾…åŠ©å‡½æ•°
 
 bool isSpace(int r) {
-    // ´¦Àí¿Õ¸ñ
+    // åˆ¤æ–­æ˜¯å¦æ˜¯ç©ºæ ¼å­—ç¬¦
     return r == ' ' || r == '\t' || r == '\r' || r == '\n';
 }
 
 bool isAlphaNumeric(int r) {
-    // ÏÂ»®Ïß¡¢´óĞ¡Ğ´×ÖÄ¸¡¢Êı×Ö
-    return r == '_' || std::isalpha(r) || std::isdigit(r);
+    // åˆ¤æ–­æ˜¯å¦æ˜¯å­—æ¯æ•°å­—å­—ç¬¦æˆ–ä¸‹åˆ’çº¿
+    return isalnum(r) || r == '_';
 }
 
 bool hasLeftTrimMarker(const std::string& s) {
-    return s.length() >= 2 && s[0] == TRIM_MARKER && isSpace(s[1]);
+    return s.length() >= 2 && s[0] == '-' && s[1] == ' ';
 }
 
 bool hasRightTrimMarker(const std::string& s) {
-    return s.length() >= 2 && isSpace(s[0]) && s[1] == TRIM_MARKER;
+    return s.length() >= 2 && s[s.length()-2] == ' ' && s[s.length()-1] == '-';
 }
 
-// ¼ÆËã×óÓÒÁ½²àÁ¬Ğø¿Õ°××Ö·ûµÄ³¤¶È
+// è®¡ç®—å­—ç¬¦ä¸²å³ä¾§çš„ç©ºç™½é•¿åº¦
 Pos rightTrimLength(const std::string& s) {
-    size_t len = s.length();
-    size_t i = len;
-    while (i > 0 && SPACE_CHARS.find(s[i-1]) != std::string::npos) {
+    Pos i = s.length();
+    while (i > 0 && isSpace(s[i-1])) {
         i--;
     }
-    return len - i;
+    return s.length() - i;
 }
 
 Pos leftTrimLength(const std::string& s) {
-    size_t i = 0;
-    while (i < s.length() && SPACE_CHARS.find(s[i]) != std::string::npos) {
+    Pos i = 0;
+    while (i < s.length() && isSpace(s[i])) {
         i++;
     }
     return i;
 }
 
-// ´Ê·¨·ÖÎöÆ÷¹¹Ôìº¯Êı
+// Lexer æ„é€ å‡½æ•°
 Lexer::Lexer(const std::string& name, const std::string& input, 
              const std::string& left, const std::string& right)
     : name_(name), input_(input), 
       leftDelim_(left.empty() ? "{{" : left), 
       rightDelim_(right.empty() ? "}}" : right),
       pos_(0), start_(0), atEOF_(false), parenDepth_(0), line_(1), startLine_(1),
-      insideAction_(false), lastPos_(0), lastType_(ItemType::ItemError) {
-    
-    keyMap_ = buildKeywordMap();
+      insideAction_(false), lastPos_(0), lastType_(ItemEOF), keyMap_(buildKeywordMap()) {
 }
 
-// ÉèÖÃ´Ê·¨·ÖÎöÆ÷Ñ¡Ïî
+// è®¾ç½®è¯æ³•åˆ†æå™¨é€‰é¡¹
 void Lexer::setOptions(const LexOptions& options) {
     options_ = options;
 }
 
-// ·µ»ØÊäÈëÖĞµÄÏÂÒ»¸ö×Ö·û
+// è¯»å–ä¸‹ä¸€ä¸ªå­—ç¬¦
 int Lexer::next() {
     if (pos_ >= input_.length()) {
         atEOF_ = true;
@@ -130,7 +115,7 @@ int Lexer::next() {
     return ch;
 }
 
-// ²é¿´µ«²»Ïû·ÑÊäÈëÖĞµÄÏÂÒ»¸ö×Ö·û
+// æŸ¥çœ‹ä¸‹ä¸€ä¸ªå­—ç¬¦ä½†ä¸ç§»åŠ¨ä½ç½®
 int Lexer::peek() const {
     if (pos_ >= input_.length()) {
         return EOF_RUNE;
@@ -138,7 +123,7 @@ int Lexer::peek() const {
     return input_[pos_];
 }
 
-// ºóÍËÒ»¸ö×Ö·û
+// å›é€€ä¸€ä¸ªå­—ç¬¦
 void Lexer::backup() {
     if (!atEOF_ && pos_ > 0) {
         pos_--;
@@ -148,111 +133,104 @@ void Lexer::backup() {
     }
 }
 
-// Îª´íÎó´´½¨Ò»¸öItem
+// åˆ›å»ºé”™è¯¯ Item
 Item Lexer::errorItem(const std::string& format, ...) {
-    char buffer[1024];
     va_list args;
     va_start(args, format);
-    vsnprintf(buffer, sizeof(buffer), format.c_str(), args);
+    char buf[1024];
+    vsnprintf(buf, sizeof(buf), format.c_str(), args);
     va_end(args);
     
-    return Item(ItemType::ItemError, start_, buffer, startLine_);
+    return Item(ItemError, pos_, buf, line_);
 }
 
-// Ìø¹ı´ËµãÖ®Ç°µÄ´ı´¦ÀíÊäÈë
+// å¿½ç•¥å½“å‰ç´¯ç§¯çš„ token
 void Lexer::ignore() {
     start_ = pos_;
     startLine_ = line_;
 }
 
-// Èç¹ûÏÂÒ»¸ö×Ö·ûÀ´×ÔÓĞĞ§¼¯ºÏ£¬ÔòÏûºÄËü
+// å¦‚æœä¸‹ä¸€ä¸ªå­—ç¬¦åœ¨æœ‰æ•ˆé›†åˆä¸­ï¼Œåˆ™æ¥å—å®ƒ
 bool Lexer::accept(const std::string& valid) {
-    int r = next();
-    if (r != EOF_RUNE && valid.find(static_cast<char>(r)) != std::string::npos) {
+    if (pos_ >= input_.length()) {
+        return false;
+    }
+    if (valid.find(input_[pos_]) != std::string::npos) {
+        pos_++;
         return true;
     }
-    backup();
     return false;
 }
 
-// ÏûºÄÓĞĞ§¼¯ºÏÖĞµÄÒ»×é×Ö·û
+// æ¥å—æœ‰æ•ˆé›†åˆä¸­çš„è¿ç»­å­—ç¬¦
 void Lexer::acceptRun(const std::string& valid) {
-    while (true) {
-        int r = next();
-        if (r == EOF_RUNE || valid.find(static_cast<char>(r)) == std::string::npos) {
-            break;
-        }
+    while (pos_ < input_.length() && valid.find(input_[pos_]) != std::string::npos) {
+        pos_++;
     }
-    backup();
 }
 
-// ²âÊÔÊÇ·ñÔÚÓÒ·Ö¸ô·û´¦
+// æ£€æŸ¥å½“å‰ä½ç½®æ˜¯å¦æ˜¯å³å®šç•Œç¬¦ï¼Œå¹¶æ£€æŸ¥æ˜¯å¦æœ‰ä¿®å‰ªæ ‡è®°
 std::pair<bool, bool> Lexer::atRightDelim() {
-    // ¼ì²é´øĞŞ¼ô±ê¼ÇµÄÓÒ·Ö¸ô·û
-    if (pos_ > 0 && hasRightTrimMarker(input_.substr(pos_-1)) && 
-        pos_-1+TRIM_MARKER_LEN+rightDelim_.length() <= input_.length() && 
-        input_.substr(pos_-1+TRIM_MARKER_LEN, rightDelim_.length()) == rightDelim_) {
-        return {true, true};
+    if (pos_ + rightDelim_.length() > input_.length()) {
+        return std::make_pair(false, false);
     }
-    // ¼ì²é²»´øĞŞ¼ô±ê¼ÇµÄÓÒ·Ö¸ô·û
-    if (pos_+rightDelim_.length() <= input_.length() && 
-        input_.substr(pos_, rightDelim_.length()) == rightDelim_) {
-        return {true, false};
+    
+    std::string rightPart = input_.substr(pos_, rightDelim_.length());
+    bool isDelim = (rightPart == rightDelim_);
+    
+    // æ£€æŸ¥æ˜¯å¦æ˜¯ä¿®å‰ªæ ‡è®°
+    bool hasTrimMarker = false;
+    if (pos_ >= TRIM_MARKER_LEN && 
+        hasRightTrimMarker(input_.substr(pos_ - TRIM_MARKER_LEN, TRIM_MARKER_LEN))) {
+        hasTrimMarker = true;
     }
-    return {false, false};
+    
+    return std::make_pair(isDelim, hasTrimMarker);
 }
 
-// ²âÊÔÊÇ·ñÔÚÖÕÖ¹·û´¦
+// æ£€æŸ¥å½“å‰ä½ç½®æ˜¯å¦æ˜¯åŠ¨ä½œå‘½ä»¤çš„çš„ç»ˆæ­¢ç¬¦
 bool Lexer::atTerminator() {
-    int r = peek();
-    if (isSpace(r)) {
+    if (pos_ >= input_.length()) {
         return true;
     }
-    switch (r) {
-        case EOF_RUNE:
-        case '.':
-        case ',':
-        case '|':
-        case ':':
-        case ')':
-        case '(':
-            return true;
-    }
-    return pos_+rightDelim_.length() <= input_.length() && 
-           input_.substr(pos_, rightDelim_.length()) == rightDelim_;
+    int r = input_[pos_];
+    return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == ';' || r == ',';
 }
 
-// É¨ÃèÊı×Ö
+// æ‰«ææ•°å­—
 bool Lexer::scanNumber() {
-    // ¿ÉÑ¡µÄÇ°µ¼·ûºÅ
+    // å…è®¸å¯é€‰çš„æ­£è´Ÿå·
     accept("+-");
-    // ÊÇÊ®Áù½øÖÆÂğ£¿
+    // å‡è®¾æ˜¯åè¿›åˆ¶æ•°
     std::string digits = "0123456789_";
     if (accept("0")) {
-        // ×¢Òâ£º¸¡µãÊıÖĞµÄÇ°µ¼0²»±íÊ¾°Ë½øÖÆ
+        // å¤„ç†ä¸åŒè¿›åˆ¶å‰ç¼€
         if (accept("xX")) {
+            // åå…­è¿›åˆ¶
             digits = "0123456789abcdefABCDEF_";
         } else if (accept("oO")) {
+            // å…«è¿›åˆ¶ (C++14 æ ‡å‡†ï¼Œä½† GCC å¯èƒ½ä½œä¸ºæ‰©å±•æ”¯æŒ)
             digits = "01234567_";
         } else if (accept("bB")) {
+            // äºŒè¿›åˆ¶ (C++14 æ ‡å‡†ï¼Œä½† GCC å¯èƒ½ä½œä¸ºæ‰©å±•æ”¯æŒ)
             digits = "01_";
         }
     }
-    acceptRun(digits);
-    if (accept(".")) {
+    acceptRun(digits); // æ‰«ææ•°å­—éƒ¨åˆ†
+    if (accept(".")) { // å°æ•°ç‚¹
         acceptRun(digits);
     }
-    if (digits.length() == 10+1 && accept("eE")) {
+    if (digits.length() == 10+1 && accept("eE")) { // æŒ‡æ•° (åè¿›åˆ¶)
         accept("+-");
         acceptRun("0123456789_");
     }
-    if (digits.length() == 16+6+1 && accept("pP")) {
+    if (digits.length() == 16+6+1 && accept("pP")) { // æŒ‡æ•° (åå…­è¿›åˆ¶ C99/C++17)
         accept("+-");
         acceptRun("0123456789_");
     }
-    // ÊÇĞéÊıÂğ£¿
+    // å¯èƒ½æ˜¯è™šæ•°ï¼Ÿ (Go è¯­è¨€ç‰¹æ€§)
     accept("i");
-    // ÏÂÒ»¸ö×Ö·û²»ÄÜÊÇ×ÖÄ¸Êı×Ö
+    // æ£€æŸ¥åé¢æ˜¯å¦ç´§è·Ÿå­—æ¯æ•°å­—ï¼ˆæ— æ•ˆæ•°å­—æ ¼å¼ï¼‰
     if (isAlphaNumeric(peek())) {
         next();
         return false;
@@ -260,75 +238,79 @@ bool Lexer::scanNumber() {
     return true;
 }
 
-// »ñÈ¡ÏÂÒ»¸ö´Ê·¨µ¥Ôª
+// è·å–ä¸‹ä¸€ä¸ªè¯æ³•é¡¹ï¼ˆçŠ¶æ€æœºå…¥å£ï¼‰
 Item Lexer::nextItem() {
-    // Èç¹ûÒÑ¾­µ½´ïÎÄ¼ş½áÊø£¬·µ»ØEOF
-    if (atEOF_) {
-        return Item(ItemType::ItemEOF, pos_, "EOF", line_);
+    if (pos_ >= input_.length()) {
+        if (atEOF_) {
+            return Item(ItemEOF, pos_, "EOF", line_);
+        }
+        atEOF_ = true;
+        return Item(ItemEOF, pos_, "EOF", line_);
     }
 
-    // ÖØÖÃ¿ªÊ¼Î»ÖÃºÍĞĞºÅ
-    start_ = pos_;
-    startLine_ = line_;
-
-    // ¸ù¾İµ±Ç°×´Ì¬µ÷ÓÃÏàÓ¦µÄ´¦Àíº¯Êı
     if (insideAction_) {
         return lexInsideAction();
-    } else {
-        return lexText();
     }
+    return lexText();
 }
 
-// »ñÈ¡ËùÓĞÏîÄ¿
-std::vector<Item> Lexer::getAllItems() {
-    std::vector<Item> items;
-    Item item;
-    do {
-        item = nextItem();
-        items.push_back(item);
-    } while (item.type != ItemType::ItemEOF && item.type != ItemType::ItemError);
-    return items;
-}
-
-// ´¦ÀíÆÕÍ¨ÎÄ±¾
+// è§£ææ™®é€šæ–‡æœ¬çŠ¶æ€
 Item Lexer::lexText() {
+    // æŸ¥æ‰¾ç¬¬ä¸€ä¸ªå®šç•Œç¬¦
     size_t x = input_.find(leftDelim_, pos_);
-    if (x != std::string::npos) {
-        if (x > pos_) {
-            // ·µ»ØÎÄ±¾Æ¬¶Î
-            pos_ = x;
-            Item result(ItemType::ItemText, start_, input_.substr(start_, pos_ - start_), startLine_);
+    if (x != std::string::npos) { // æ‰¾åˆ°äº†
+        if (x > pos_) { // å®šç•Œç¬¦ä¸åœ¨å½“å‰ä½ç½®ï¼Œè¯´æ˜å‰é¢æœ‰æ–‡æœ¬
+            // é€ä¸ªè¯»å–å­—ç¬¦ç›´åˆ°å®šç•Œç¬¦ xï¼Œä»¥ä¾¿æ›´æ–°è¡Œå·
+            while (pos_ < x) {
+                next();
+            }
+            // ç°åœ¨ pos_ ç­‰äº xï¼Œä¸” line_ å·²ç»æ›´æ–°
+            Item result(ItemText, start_, input_.substr(start_, pos_ - start_), startLine_);
+            ignore(); // å¿½ç•¥ start_ ä¹‹å‰çš„éƒ¨åˆ†ï¼Œå‡†å¤‡å¤„ç†å®šç•Œç¬¦
             return result;
         }
-        // ´¦Àí×ó·Ö¸ô·û
+        // ç›´æ¥å¤„ç†å®šç•Œç¬¦
+        ignore(); // ç¡®ä¿start_æ˜¯æ­£ç¡®çš„
         return lexLeftDelim();
     }
     
-    // µ½´ïÊäÈë½áÊø
-    pos_ = input_.length();
-    if (pos_ > start_) {
-        // ·µ»Ø×îºóµÄÎÄ±¾Æ¬¶Î
-        Item result(ItemType::ItemText, start_, input_.substr(start_, pos_ - start_), startLine_);
+    // æ²¡æœ‰æ‰¾åˆ°å®šç•Œç¬¦ï¼Œå¤„ç†å‰©ä½™çš„éƒ¨åˆ†
+    size_t endPos = input_.length();
+    if (endPos > pos_) { // æ£€æŸ¥æ˜¯å¦è¿˜æœ‰å‰©ä½™æ–‡æœ¬
+        // é€ä¸ªè¯»å–å‰©ä½™æ‰€æœ‰å­—ç¬¦ï¼Œä»¥ä¾¿æ›´æ–°è¡Œå·
+        while (pos_ < endPos) {
+            next();
+        }
+        // å¤„ç†å‰©ä½™çš„éƒ¨åˆ†
+        Item result(ItemText, start_, input_.substr(start_, pos_ - start_), startLine_);
+        // æ³¨æ„ï¼šè¿™é‡Œä¸éœ€è¦è°ƒç”¨ ignore()ï¼Œå› ä¸ºåé¢æ²¡æœ‰ token äº†
         return result;
     }
-    // ÕæÕıµÄEOF
+
+    // æ–‡ä»¶ç»“æŸ
     atEOF_ = true;
-    return Item(ItemType::ItemEOF, pos_, "EOF", line_);
+    // æ–‡ä»¶ç»“æŸæ—¶ï¼Œä½¿ç”¨å½“å‰çš„ line_
+    return Item(ItemEOF, pos_, "EOF", line_);
 }
 
-// ´¦Àí×ó·Ö¸ô·û
+// è§£æå·¦å®šç•Œç¬¦çŠ¶æ€
 Item Lexer::lexLeftDelim() {
+    // è®°å½•å®šç•Œç¬¦çš„èµ·å§‹ä½ç½®
+    Pos delimStart = pos_;
     pos_ += leftDelim_.length();
+    
+    // å¤„ç†ç©ºæ ¼
     bool trimSpace = false;
     if (pos_ < input_.length() && hasLeftTrimMarker(input_.substr(pos_))) {
         trimSpace = true;
     }
+    
     Pos afterMarker = 0;
     if (trimSpace) {
         afterMarker = TRIM_MARKER_LEN;
     }
     
-    // ¼ì²éÊÇ·ñÊÇ×¢ÊÍ
+    // æ£€æŸ¥æ˜¯å¦æ˜¯æ³¨é‡Š
     if (pos_ + afterMarker + LEFT_COMMENT.length() <= input_.length() &&
         input_.substr(pos_ + afterMarker, LEFT_COMMENT.length()) == LEFT_COMMENT) {
         pos_ += afterMarker;
@@ -336,16 +318,19 @@ Item Lexer::lexLeftDelim() {
         return lexComment();
     }
     
-    // ²»ÊÇ×¢ÊÍ£¬·µ»Ø×ó·Ö¸ô·ûÏî
-    Item result(ItemType::ItemLeftDelim, start_, input_.substr(start_, pos_ - start_), startLine_);
+    // å¤„ç†å®šç•Œç¬¦
+    Item result(ItemLeftDelim, delimStart, leftDelim_, startLine_);
+    
+    // è®¾ç½®çŠ¶æ€
     insideAction_ = true;
     pos_ += afterMarker;
     parenDepth_ = 0;
-    ignore();
+    ignore(); // å¿½ç•¥start_ä½ç½®
+    
     return result;
 }
 
-// ´¦Àí×¢ÊÍ
+// è§£ææ³¨é‡ŠçŠ¶æ€
 Item Lexer::lexComment() {
     pos_ += LEFT_COMMENT.length();
     size_t x = input_.find(RIGHT_COMMENT, pos_);
@@ -357,7 +342,7 @@ Item Lexer::lexComment() {
     if (!delim) {
         return errorItem("comment ends before closing delimiter");
     }
-    Item result(ItemType::ItemComment, start_, input_.substr(start_, pos_ - start_), startLine_);
+    Item result(ItemComment, start_, input_.substr(start_, pos_ - start_), startLine_);
     if (trimSpace) {
         pos_ += TRIM_MARKER_LEN;
     }
@@ -372,103 +357,152 @@ Item Lexer::lexComment() {
         return result;
     }
     
-    // Èç¹û²»·¢³ö×¢ÊÍ£¬¾Í¼ÌĞø½âÎöÏÂÒ»¸öÏî
+    // æ£€æŸ¥åé¢æ˜¯å¦ç´§è·Ÿå­—æ¯æ•°å­—ï¼ˆæ— æ•ˆæ•°å­—æ ¼å¼ï¼‰
     return nextItem();
 }
 
-// ´¦ÀíÓÒ·Ö¸ô·û
+// è§£æå³å®šç•Œç¬¦çŠ¶æ€
 Item Lexer::lexRightDelim() {
-    auto [_, trimSpace] = atRightDelim();
-    if (trimSpace) {
-        pos_ += TRIM_MARKER_LEN;
-        ignore();
+    // è®°å½•èµ·å§‹ä½ç½®
+    Pos delimStart = pos_;
+    
+    // æ£€æŸ¥å‰é¢æ˜¯å¦æœ‰ç©ºæ ¼
+    bool trimSpace = false;
+    if (pos_ >= TRIM_MARKER_LEN && 
+        hasRightTrimMarker(input_.substr(pos_ - TRIM_MARKER_LEN, TRIM_MARKER_LEN))) {
+        trimSpace = true;
+        pos_ = pos_ - TRIM_MARKER_LEN;
     }
+    
+    // å¤„ç†å®šç•Œç¬¦
+    Item result(ItemRightDelim, delimStart, rightDelim_, startLine_);
+    
+    // ç§»åŠ¨åˆ°å®šç•Œç¬¦ä¹‹å
     pos_ += rightDelim_.length();
-    Item result(ItemType::ItemRightDelim, start_, input_.substr(start_, pos_ - start_), startLine_);
+    
+    // å¤„ç†åé¢æ˜¯å¦æœ‰ç©ºæ ¼
     if (trimSpace && pos_ < input_.length()) {
         pos_ += leftTrimLength(input_.substr(pos_));
-        ignore();
     }
+    
+    // è®¾ç½®çŠ¶æ€
     insideAction_ = false;
+    ignore();
+    
     return result;
 }
 
-// ´¦Àí²Ù×÷ÄÚ²¿µÄÄÚÈİ
+// è§£æ Action å†…éƒ¨çŠ¶æ€
 Item Lexer::lexInsideAction() {
-    // ¼ì²éÊÇ·ñÔÚÓÒ·Ö¸ô·û´¦
-    auto [delim, _] = atRightDelim();
-    if (delim) {
+    // å¤„ç†å‰é¢çš„ç©ºæ ¼
+    if (peek() == ' ' || peek() == '\t' || peek() == '\r' || peek() == '\n') {
+        return lexSpace();
+    }
+    ignore(); // å¿½ç•¥start_ä½ç½®
+    
+    // æ£€æŸ¥æ˜¯å¦æ˜¯EOF
+    if (peek() == EOF_RUNE) {
+        return errorItem("unclosed action");
+    }
+    
+    // æ£€æŸ¥æ˜¯å¦æ˜¯å®šç•Œç¬¦
+    auto [isDelim, hasTrimMarker] = atRightDelim();
+    if (isDelim) {
         if (parenDepth_ == 0) {
             return lexRightDelim();
         }
         return errorItem("unclosed left paren");
     }
     
+    // æ ¹æ®ç¬¬ä¸€ä¸ªå­—ç¬¦ç¡®å®šçŠ¶æ€
     int r = next();
     switch (r) {
-        case EOF_RUNE:
-            return errorItem("unclosed action");
         case ' ': case '\t': case '\r': case '\n':
-            backup(); // ·Å»Ø¿Õ¸ñ
+            // å¤„ç†ç©ºæ ¼
+            backup();
             return lexSpace();
+            
         case '=':
-            return Item(ItemType::ItemAssign, start_, "=", startLine_);
+            // å¤„ç†èµ‹å€¼
+            return Item(ItemAssign, start_, "=", startLine_);
+            
         case ':':
+            // å¤„ç†å£°æ˜
             if (next() != '=') {
                 return errorItem("expected :=");
             }
-            return Item(ItemType::ItemDeclare, start_, ":=", startLine_);
+            return Item(ItemDeclare, start_, ":=", startLine_);
+            
         case '|':
-            return Item(ItemType::ItemPipe, start_, "|", startLine_);
+            // å¤„ç†ç®¡é“
+            return Item(ItemPipe, start_, "|", startLine_);
+            
         case '"':
+            // å¤„ç†å­—ç¬¦ä¸²
             return lexQuote();
+            
         case '`':
+            // å¤„ç†åŸå§‹å­—ç¬¦ä¸²
             return lexRawQuote();
-        case '$':
-            return lexVariable();
+            
         case '\'':
+            // å¤„ç†å­—ç¬¦
             return lexChar();
-        case '.':
-            if (pos_ < input_.length()) {
-                char ch = input_[pos_];
-                if (ch < '0' || ch > '9') {
-                    return lexField();
-                }
-            }
-            backup();
-            return lexNumber();
-        case '+': case '-': case '0': case '1': case '2': case '3': case '4':
-        case '5': case '6': case '7': case '8': case '9':
-            backup();
-            return lexNumber();
-        case 'a': case 'b': case 'c': case 'd': case 'e': case 'f': case 'g':
-        case 'h': case 'i': case 'j': case 'k': case 'l': case 'm': case 'n':
-        case 'o': case 'p': case 'q': case 'r': case 's': case 't': case 'u':
-        case 'v': case 'w': case 'x': case 'y': case 'z': case 'A': case 'B':
-        case 'C': case 'D': case 'E': case 'F': case 'G': case 'H': case 'I':
-        case 'J': case 'K': case 'L': case 'M': case 'N': case 'O': case 'P':
-        case 'Q': case 'R': case 'S': case 'T': case 'U': case 'V': case 'W':
-        case 'X': case 'Y': case 'Z': case '_':
-            backup();
-            return lexIdentifier();
+            
+        case '$':
+            // å¤„ç†å˜é‡
+            return lexVariable();
+            
         case '(':
+            // å¤„ç†å·¦æ‹¬å·
             parenDepth_++;
-            return Item(ItemType::ItemLeftParen, start_, "(", startLine_);
+            return Item(ItemLeftParen, start_, "(", startLine_);
+            
         case ')':
+            // å¤„ç†å³æ‹¬å·
             parenDepth_--;
             if (parenDepth_ < 0) {
                 return errorItem("unexpected right paren");
             }
-            return Item(ItemType::ItemRightParen, start_, ")", startLine_);
-        default:
-            if (r <= 127 && std::isprint(r)) {
-                return Item(ItemType::ItemChar, start_, std::string(1, static_cast<char>(r)), startLine_);
+            return Item(ItemRightParen, start_, ")", startLine_);
+            
+        case '.':
+            // æ£€æŸ¥æ˜¯å¦æ˜¯æ•°å­—
+            if (pos_ < input_.length() && isdigit(input_[pos_])) {
+                backup();
+                return lexNumber();
             }
+            
+            // ï¼ˆæ— æ•ˆæ•°å­—æ ¼å¼ï¼‰
+            if (pos_ < input_.length() && isAlphaNumeric(input_[pos_])) {
+                return lexField();
+            }
+            
+            return Item(ItemDot, start_, ".", startLine_);
+            
+        case '+': case '-': case '0': case '1': case '2': case '3': case '4':
+        case '5': case '6': case '7': case '8': case '9':
+            // å¤„ç†æ•°å­—
+            backup();
+            return lexNumber();
+            
+        default:
+            // è¯†åˆ«æœªçŸ¥å­—ç¬¦æˆ–å…³é”®å­—
+            if (isalpha(r) || r == '_') {
+                // è¯†åˆ«å…³é”®å­—
+                backup();
+                return lexIdentifier();
+            } else if (r <= 127 && isprint(r)) {
+                // å¤„ç†å¯æ‰“å°å­—ç¬¦
+                return Item(ItemChar, start_, std::string(1, r), startLine_);
+            }
+            
+            // è¯†åˆ«æœªçŸ¥å­—ç¬¦
             return errorItem("unrecognized character in action: %c", r);
     }
 }
 
-// ´¦Àí¿Õ¸ñ
+// è§£æç©ºæ ¼çŠ¶æ€
 Item Lexer::lexSpace() {
     int r;
     int numSpaces = 0;
@@ -481,93 +515,89 @@ Item Lexer::lexSpace() {
         numSpaces++;
     }
     
-    // ¼ì²éĞŞ¼ô±ê¼ÇµÄÓÒ·Ö¸ô·û
+    
     if (pos_ > 0 && hasRightTrimMarker(input_.substr(pos_-1)) && 
         pos_-1+TRIM_MARKER_LEN+rightDelim_.length() <= input_.length() && 
         input_.substr(pos_-1+TRIM_MARKER_LEN, rightDelim_.length()) == rightDelim_) {
-        backup(); // ÔÚ¿Õ¸ñÖ®Ç°
+        backup(); 
         if (numSpaces == 1) {
-            return lexRightDelim(); // Ö±½Ó´¦Àí·Ö¸ô·û
+            return lexRightDelim(); 
         }
     }
     
-    Item result(ItemType::ItemSpace, start_, input_.substr(start_, pos_ - start_), startLine_);
+    Item result(ItemSpace, start_, input_.substr(start_, pos_ - start_), startLine_);
+    // std::cout << "[LEX] ç”Ÿæˆç©ºæ ¼token: [" << result.val << "] è¡Œ:" << result.line << " pos:" << result.pos << std::endl;
     return result;
 }
 
-// ´¦Àí±êÊ¶·û
+// è§£ææ ‡è¯†ç¬¦çŠ¶æ€
 Item Lexer::lexIdentifier() {
-    while (true) {
-        int r = next();
-        if (!isAlphaNumeric(r)) {
-            break;
-        }
+    // è·å–è¯†åˆ«çš„å•è¯
+    while (isAlphaNumeric(peek())) {
+        next();
     }
-    backup();
     
     std::string word = input_.substr(start_, pos_ - start_);
-    if (!atTerminator()) {
-        return errorItem("bad character %c", peek());
-    }
     
+    // æ£€æŸ¥æ˜¯å¦æ˜¯å…³é”®å­—
     auto it = keyMap_.find(word);
-    if (it != keyMap_.end() && it->second > ItemType::ItemKeyword) {
-        ItemType item = it->second;
-        if ((item == ItemType::ItemBreak && !options_.breakOK) || 
-            (item == ItemType::ItemContinue && !options_.continueOK)) {
-            return Item(ItemType::ItemIdentifier, start_, word, startLine_);
+    if (it != keyMap_.end()) {
+        // æ˜¯å…³é”®å­—
+        ItemType keyword = it->second;
+        
+        // å¤„ç†breakå’Œcontinueå…³é”®å­—
+        if ((keyword == ItemBreak && !options_.breakOK) || 
+            (keyword == ItemContinue && !options_.continueOK)) {
+            return Item(ItemIdentifier, start_, word, startLine_);
         }
-        return Item(item, start_, word, startLine_);
-    } else if (word == "true" || word == "false") {
-        return Item(ItemType::ItemBool, start_, word, startLine_);
-    } else {
-        return Item(ItemType::ItemIdentifier, start_, word, startLine_);
+        
+        // è¿”å›å…³é”®å­—
+        return Item(keyword, start_, word, startLine_);
     }
+    
+    // æ£€æŸ¥æ˜¯å¦æ˜¯å¸ƒå°”å€¼
+    if (word == "true" || word == "false") {
+        return Item(ItemBool, start_, word, startLine_);
+    }
+    
+    // è¿”å›æ™®é€šæ ‡è¯†ç¬¦
+    return Item(ItemIdentifier, start_, word, startLine_);
 }
 
-// ´¦Àí×Ö¶Î
 Item Lexer::lexField() {
-    if (pos_ >= input_.length() || !isAlphaNumeric(input_[pos_])) {
-        return Item(ItemType::ItemDot, start_, ".", startLine_);
+    
+    std::string fieldName = ".";
+    
+    
+    while (pos_ < input_.length() && isAlphaNumeric(peek())) {
+        fieldName += next();
     }
     
-    while (true) {
-        int r = next();
-        if (!isAlphaNumeric(r)) {
-            backup();
-            break;
-        }
-    }
     
-    if (!atTerminator()) {
-        return errorItem("bad character %c", peek());
-    }
+    std::cout << "è§£æå­—æ®µ: " << fieldName << std::endl;
     
-    return Item(ItemType::ItemField, start_, input_.substr(start_, pos_ - start_), startLine_);
+    return Item(ItemField, start_, fieldName, startLine_);
 }
 
-// ´¦Àí±äÁ¿
+// è§£æå˜é‡çŠ¶æ€ (ä»¥ '$' å¼€å¤´)
 Item Lexer::lexVariable() {
-    if (atTerminator()) { // µ¥¶ÀµÄ"$"
-        return Item(ItemType::ItemVariable, start_, "$", startLine_);
+    std::string varName = "$";
+    
+    // æ£€æŸ¥æ˜¯å¦åªåŒ…å« $
+    if (pos_ >= input_.length() || !isAlphaNumeric(peek())) {
+        return Item(ItemVariable, start_, "$", startLine_);
     }
     
-    while (true) {
-        int r = next();
-        if (!isAlphaNumeric(r)) {
-            backup();
-            break;
-        }
+    // è·å–å˜é‡å
+    while (pos_ < input_.length() && isAlphaNumeric(peek())) {
+        varName += next();
     }
     
-    if (!atTerminator()) {
-        return errorItem("bad character %c", peek());
-    }
-    
-    return Item(ItemType::ItemVariable, start_, input_.substr(start_, pos_ - start_), startLine_);
+    std::cout << "è§£æå˜é‡: " << varName << std::endl;
+    return Item(ItemVariable, start_, varName, startLine_);
 }
 
-// ´¦Àí×Ö·û³£Á¿
+// è§£æå•ä¸ªå­—ç¬¦çŠ¶æ€ (Action å†…éƒ¨)
 Item Lexer::lexChar() {
     while (true) {
         int r = next();
@@ -585,10 +615,10 @@ Item Lexer::lexChar() {
             break;
         }
     }
-    return Item(ItemType::ItemCharConstant, start_, input_.substr(start_, pos_ - start_), startLine_);
+    return Item(ItemCharConstant, start_, input_.substr(start_, pos_ - start_), startLine_);
 }
 
-// ´¦ÀíÊı×Ö
+// è§£ææ•°å­—çŠ¶æ€ (Action å†…éƒ¨)
 Item Lexer::lexNumber() {
     if (!scanNumber()) {
         return errorItem("bad number syntax: %s", input_.substr(start_, pos_ - start_).c_str());
@@ -596,18 +626,18 @@ Item Lexer::lexNumber() {
     
     int sign = peek();
     if (sign == '+' || sign == '-') {
-        // ¸´Êı: 1+2i
+        // : 1+2i
         next();
         if (!scanNumber() || input_[pos_-1] != 'i') {
             return errorItem("bad number syntax: %s", input_.substr(start_, pos_ - start_).c_str());
         }
-        return Item(ItemType::ItemComplex, start_, input_.substr(start_, pos_ - start_), startLine_);
+        return Item(ItemComplex, start_, input_.substr(start_, pos_ - start_), startLine_);
     }
     
-    return Item(ItemType::ItemNumber, start_, input_.substr(start_, pos_ - start_), startLine_);
+    return Item(ItemNumber, start_, input_.substr(start_, pos_ - start_), startLine_);
 }
 
-// ´¦ÀíÒıÓÃ×Ö·û´®
+// è§£æå¸¦å¼•å·å­—ç¬¦ä¸²çŠ¶æ€
 Item Lexer::lexQuote() {
     while (true) {
         int r = next();
@@ -625,10 +655,10 @@ Item Lexer::lexQuote() {
             break;
         }
     }
-    return Item(ItemType::ItemString, start_, input_.substr(start_, pos_ - start_), startLine_);
+    return Item(ItemString, start_, input_.substr(start_, pos_ - start_), startLine_);
 }
 
-// ´¦ÀíÔ­Ê¼ÒıÓÃ×Ö·û´®
+// è§£æåå¼•å·åŸå§‹å­—ç¬¦ä¸²çŠ¶æ€
 Item Lexer::lexRawQuote() {
     while (true) {
         int r = next();
@@ -639,61 +669,58 @@ Item Lexer::lexRawQuote() {
             break;
         }
     }
-    return Item(ItemType::ItemRawString, start_, input_.substr(start_, pos_ - start_), startLine_);
+    return Item(ItemRawString, start_, input_.substr(start_, pos_ - start_), startLine_);
 }
 
-// ´´½¨´Ê·¨·ÖÎöÆ÷µÄ¹¤³§º¯Êı
-std::shared_ptr<Lexer> createLexer(const std::string& name, const std::string& input, 
-                                const std::string& left, const std::string& right) {
-    return std::make_shared<Lexer>(name, input, left, right);
+// å·¥å‚å‡½æ•°ï¼šåˆ›å»º Lexer å®ä¾‹
+Lexer* createLexer(const std::string& name, const std::string& input, 
+                        const std::string& left, const std::string& right) {
+    return new Lexer(name, input, left, right);
 }
 
-// ½«´Ê·¨ÏîÀàĞÍ×ª»»Îª×Ö·û´®µÄ¸¨Öúº¯Êı
+// å°† ItemType æšä¸¾è½¬æ¢ä¸ºå­—ç¬¦ä¸²
 std::string itemTypeToString(ItemType type) {
     switch (type) {
-        case ItemType::ItemError: return "Error";
-        case ItemType::ItemBool: return "Bool";
-        case ItemType::ItemChar: return "Char";
-        case ItemType::ItemCharConstant: return "CharConstant";
-        case ItemType::ItemComment: return "Comment";
-        case ItemType::ItemComplex: return "Complex";
-        case ItemType::ItemAssign: return "Assign";
-        case ItemType::ItemDeclare: return "Declare";
-        case ItemType::ItemEOF: return "EOF";
-        case ItemType::ItemField: return "Field";
-        case ItemType::ItemIdentifier: return "Identifier";
-        case ItemType::ItemLeftDelim: return "LeftDelim";
-        case ItemType::ItemLeftParen: return "LeftParen";
-        case ItemType::ItemNumber: return "Number";
-        case ItemType::ItemPipe: return "Pipe";
-        case ItemType::ItemRawString: return "RawString";
-        case ItemType::ItemRightDelim: return "RightDelim";
-        case ItemType::ItemRightParen: return "RightParen";
-        case ItemType::ItemSpace: return "Space";
-        case ItemType::ItemString: return "String";
-        case ItemType::ItemText: return "Text";
-        case ItemType::ItemVariable: return "Variable";
-        case ItemType::ItemKeyword: return "Keyword";
-        case ItemType::ItemBlock: return "Block";
-        case ItemType::ItemBreak: return "Break";
-        case ItemType::ItemContinue: return "Continue";
-        case ItemType::ItemDot: return "Dot";
-        case ItemType::ItemDefine: return "Define";
-        case ItemType::ItemElse: return "Else";
-        case ItemType::ItemEnd: return "End";
-        case ItemType::ItemIf: return "If";
-        case ItemType::ItemNil: return "Nil";
-        case ItemType::ItemRange: return "Range";
-        case ItemType::ItemTemplate: return "Template";
-        case ItemType::ItemWith: return "With";
-        default: return "Unknown";
+        case ItemError: return "error";
+        case ItemBool: return "bool";
+        case ItemChar: return "char";
+        case ItemCharConstant: return "charConstant";
+        case ItemComment: return "comment";
+        case ItemComplex: return "complex";
+        case ItemAssign: return "assign";
+        case ItemDeclare: return "declare";
+        case ItemEOF: return "EOF";
+        case ItemField: return "field";
+        case ItemIdentifier: return "identifier";
+        case ItemLeftDelim: return "leftDelim";
+        case ItemLeftParen: return "leftParen";
+        case ItemNumber: return "number";
+        case ItemPipe: return "pipe";
+        case ItemRawString: return "rawString";
+        case ItemRightDelim: return "rightDelim";
+        case ItemRightParen: return "rightParen";
+        case ItemSpace: return "space";
+        case ItemString: return "string";
+        case ItemText: return "text";
+        case ItemVariable: return "variable";
+        case ItemKeyword: return "keyword";
+        case ItemBlock: return "block";
+        case ItemBreak: return "break";
+        case ItemContinue: return "continue";
+        case ItemDot: return "dot";
+        case ItemDefine: return "define";
+        case ItemElse: return "else";
+        case ItemEnd: return "end";
+        case ItemIf: return "if";
+        case ItemNil: return "nil";
+        case ItemRange: return "range";
+        case ItemTemplate: return "template";
+        case ItemWith: return "with";
+        default: return "unknown";
     }
 }
 
-
-
-
-// // ±ãÓÚ´òÓ¡´Ê·¨ÏîµÄ¸¨Öúº¯Êı
+// // ????
 // void printItem(const Item& item) {
 //     std::cout << "[" << itemTypeToString(item.type) << "] "
 //              << "'" << item.val << "' "
@@ -701,15 +728,15 @@ std::string itemTypeToString(ItemType type) {
 //              << ", Pos:" << item.pos << ")\n";
 // }
 
-// // ´òÓ¡±ê¼ÇÁĞ±í
+// // ?
 // void printTokensWithFormat(const std::vector<Item>& items) {
-//     std::cout << "©°©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©Ğ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©Ğ©¤©¤©¤©¤©¤©¤©¤©Ğ©¤©¤©¤©¤©¤©¤©¤©¤©´\n";
-//     std::cout << "©¦ ÀàĞÍ            ©¦ Öµ                           ©¦ ĞĞºÅ  ©¦ Î»ÖÃ   ©¦\n";
-//     std::cout << "©À©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©à©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©à©¤©¤©¤©¤©¤©¤©¤©à©¤©¤©¤©¤©¤©¤©¤©¤©È\n";
+//     std::cout << "?????????????????????????????????????ï¿½ï¿½????????????????????????????????????????????????????????????ï¿½ï¿½??????????????ï¿½ï¿½?????????????????\n";
+//     std::cout << "?? ????            ?? ?                           ?? ?ï¿½ï¿½?  ?? ï¿½ï¿½??   ??\n";
+//     std::cout << "????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????\n";
     
 //     for (const auto& item : items) {
 //         std::string value = item.val;
-//         // Ìæ»»»»ĞĞ·ûÎª¿É¼û±íÊ¾
+//         // ?ï¿½I???ï¿½ï¿½????????
 //         std::string displayValue = "";
 //         for (char c : value) {
 //             if (c == '\n') displayValue += "\\n";
@@ -718,44 +745,44 @@ std::string itemTypeToString(ItemType type) {
 //             else displayValue += c;
 //         }
         
-//         // ½Ø¶Ï¹ı³¤µÄÖµ
+//         // ?????????
 //         if (displayValue.length() > 30) {
 //             displayValue = displayValue.substr(0, 27) + "...";
 //         }
         
-//         std::cout << "©¦ " 
-//                   << std::left << std::setw(15) << itemTypeToString(item.type) << " ©¦ "
-//                   << std::left << std::setw(30) << displayValue << " ©¦ "
-//                   << std::setw(5) << item.line << " ©¦ "
-//                   << std::setw(6) << item.pos << " ©¦\n";
+//         std::cout << "?? " 
+//                   << std::left << std::setw(15) << itemTypeToString(item.type) << " ?? "
+//                   << std::left << std::setw(30) << displayValue << " ?? "
+//                   << std::setw(5) << item.line << " ?? "
+//                   << std::setw(6) << item.pos << " ??\n";
 //     }
     
-//     std::cout << "©¸©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©Ø©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©Ø©¤©¤©¤©¤©¤©¤©¤©Ø©¤©¤©¤©¤©¤©¤©¤©¤©¼\n";
+//     std::cout << "???????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????\n";
 // }
 
 // int main() {
-//     // ²âÊÔÒ»¸ö¼òµ¥µÄÄ£°å
+//     // ?????????????
 //     std::string input = "Hello {{ .Name }}! {{- if gt .Value 42 -}}\nYour value is greater.\n{{- end -}}";
     
-//     // Ê¹ÓÃÄ¬ÈÏ·Ö¸ô·û´´½¨´Ê·¨·ÖÎöÆ÷
+//     // ???????????????????????
 //     auto lexer = createLexer("test", input);
     
-//     // ÉèÖÃÑ¡Ïî - ÆôÓÃ±ØÒªµÄ¹¦ÄÜ
+//     // ??????? - ???????????
 //     LexOptions options;
 //     options.emitComment = true;
 //     options.breakOK = true;
 //     options.continueOK = true;
 //     lexer->setOptions(options);
     
-//     // »ñÈ¡ËùÓĞ´Ê·¨±ê¼Ç
+//     // ??????ï¿½ï¿½???????
 //     std::vector<Item> items = lexer->getAllItems();
     
-//     // ´òÓ¡±ê¼Ç
-//     std::cout << "ÊäÈëÄ£°å: " << input << "\n\n";
-//     std::cout << "½âÎö³ö " << items.size() << " ¸ö´Ê·¨µ¥Ôª:\n";
+//     // ????????
+//     std::cout << "???????: " << input << "\n\n";
+//     std::cout << "?????? " << items.size() << " ????????:\n";
 //     printTokensWithFormat(items);
     
-//     // ²âÊÔÒ»¸ö¸ü¸´ÔÓµÄÀı×Ó£¬°üº¬ĞŞ¼ô±ê¼ÇºÍ×¢ÊÍ
+//     // ???????????????????????????????????
 //     std::string input2 = "{{ /* This is a comment */ }}\n{{ range .Items }}\n  - {{ .Name }}: {{ .Value }}{{- if .Last }} (last one!){{ end }}\n{{ end }}";
     
 //     auto lexer2 = createLexer("test2", input2);
@@ -763,8 +790,8 @@ std::string itemTypeToString(ItemType type) {
     
 //     std::vector<Item> items2 = lexer2->getAllItems();
     
-//     std::cout << "\n\nÊäÈëÄ£°å: " << input2 << "\n\n";
-//     std::cout << "½âÎö³ö " << items2.size() << " ¸ö´Ê·¨µ¥Ôª:\n";
+//     std::cout << "\n\n???????: " << input2 << "\n\n";
+//     std::cout << "?????? " << items2.size() << " ????????:\n";
 //     printTokensWithFormat(items2);
     
 //     return 0;

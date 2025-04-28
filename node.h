@@ -3,16 +3,15 @@
 
 #include <string>
 #include <vector>
-#include <memory>
+#include <map>
 #include <sstream>
 #include <complex>
-#include <unordered_map>
 
 // 前向声明
 class Tree;
 
 // 节点类型
-enum class NodeType {
+enum NodeType {
     NodeText,         // 普通文本
     NodeAction,       // 非控制动作（如字段求值）
     NodeBool,         // 布尔常量
@@ -39,12 +38,13 @@ enum class NodeType {
 };
 
 // 位置类型
-using Pos = size_t;
+typedef size_t Pos;
 
 // 节点接口
 class Node {
 public:
-    virtual ~Node() = default;
+    Node(Pos pos) : pos_(pos) {}
+    virtual ~Node() {}
     
     // 返回节点类型
     virtual NodeType Type() const = 0;
@@ -53,16 +53,21 @@ public:
     virtual std::string String() const = 0;
     
     // 深度复制节点及其所有组件
-    virtual std::unique_ptr<Node> Copy() const = 0;
+    virtual Node* Copy() const = 0;
     
     // 返回节点在完整原始输入字符串中的起始字节位置
-    virtual Pos Position() const = 0;
+    virtual Pos Position() const { return pos_; }
     
     // 返回包含的Tree
     virtual Tree* GetTree() const = 0;
     
     // 将字符串输出写入stringstream
     virtual void WriteTo(std::stringstream& ss) const = 0;
+    
+    Pos GetPos() const { return pos_; }
+    
+protected:
+    Pos pos_;
 };
 
 // 文本节点
@@ -70,18 +75,16 @@ class TextNode : public Node {
 public:
     TextNode(Tree* tr, Pos pos, const std::string& text);
     
-    NodeType Type() const override { return NodeType::NodeText; }
-    std::string String() const override;
-    std::unique_ptr<Node> Copy() const override;
-    Pos Position() const override { return pos_; }
-    Tree* GetTree() const override { return tree_; }
-    void WriteTo(std::stringstream& ss) const override;
+    NodeType Type() const { return NodeText; }
+    std::string String() const;
+    Node* Copy() const;
+    Tree* GetTree() const { return tree_; }
+    void WriteTo(std::stringstream& ss) const;
     
-    std::string Text() const { return text_; }
+    const std::string& Text() const { return text_; }
     
-public:
+private:
     Tree* tree_;
-    Pos pos_;
     std::string text_;
 };
 
@@ -90,18 +93,16 @@ class CommentNode : public Node {
 public:
     CommentNode(Tree* tr, Pos pos, const std::string& text);
     
-    NodeType Type() const override { return NodeType::NodeComment; }
-    std::string String() const override;
-    std::unique_ptr<Node> Copy() const override;
-    Pos Position() const override { return pos_; }
-    Tree* GetTree() const override { return tree_; }
-    void WriteTo(std::stringstream& ss) const override;
+    NodeType Type() const { return NodeComment; }
+    std::string String() const;
+    Node* Copy() const;
+    Tree* GetTree() const { return tree_; }
+    void WriteTo(std::stringstream& ss) const;
     
-    std::string Text() const { return text_; }
+    const std::string& Text() const { return text_; }
     
-public:
+private:
     Tree* tree_;
-    Pos pos_;
     std::string text_;
 };
 
@@ -110,20 +111,19 @@ class ListNode : public Node {
 public:
     ListNode(Tree* tr, Pos pos);
     
-    NodeType Type() const override { return NodeType::NodeList; }
-    std::string String() const override;
-    std::unique_ptr<Node> Copy() const override;
-    Pos Position() const override { return pos_; }
-    Tree* GetTree() const override { return tree_; }
-    void WriteTo(std::stringstream& ss) const override;
+    NodeType Type() const { return NodeList; }
+    std::string String() const;
+    Node* Copy() const;
+    Tree* GetTree() const { return tree_; }
+    void WriteTo(std::stringstream& ss) const;
     
-    void Append(std::unique_ptr<Node> node);
-    const std::vector<std::unique_ptr<Node>>& Nodes() const { return nodes_; }
+    void Append(Node* node);
     
-public:
+    const std::vector<Node*>& Nodes() const { return nodes_; }
+    
+private:
     Tree* tree_;
-    Pos pos_;
-    std::vector<std::unique_ptr<Node>> nodes_;
+    std::vector<Node*> nodes_;
 };
 
 // 变量节点
@@ -131,19 +131,17 @@ class VariableNode : public Node {
 public:
     VariableNode(Tree* tr, Pos pos, const std::string& ident);
     
-    NodeType Type() const override { return NodeType::NodeVariable; }
-    std::string String() const override;
-    std::unique_ptr<Node> Copy() const override;
-    Pos Position() const override { return pos_; }
-    Tree* GetTree() const override { return tree_; }
-    void WriteTo(std::stringstream& ss) const override;
+    NodeType Type() const { return NodeVariable; }
+    std::string String() const;
+    Node* Copy() const;
+    Tree* GetTree() const { return tree_; }
+    void WriteTo(std::stringstream& ss) const;
     
-    const std::vector<std::string>& Ident() const { return ident_; }
+    const std::string& Ident() const { return ident_; }
     
-public:
+private:
     Tree* tree_;
-    Pos pos_;
-    std::vector<std::string> ident_; // 按词法顺序排列的变量名和字段
+    std::string ident_;
 };
 
 // Dot节点
@@ -151,16 +149,14 @@ class DotNode : public Node {
 public:
     DotNode(Tree* tr, Pos pos);
     
-    NodeType Type() const override { return NodeType::NodeDot; }
-    std::string String() const override { return "."; }
-    std::unique_ptr<Node> Copy() const override;
-    Pos Position() const override { return pos_; }
-    Tree* GetTree() const override { return tree_; }
-    void WriteTo(std::stringstream& ss) const override;
+    NodeType Type() const { return NodeDot; }
+    std::string String() const;
+    Node* Copy() const;
+    Tree* GetTree() const { return tree_; }
+    void WriteTo(std::stringstream& ss) const;
     
-public:
+private:
     Tree* tree_;
-    Pos pos_;
 };
 
 // Nil节点
@@ -168,16 +164,14 @@ class NilNode : public Node {
 public:
     NilNode(Tree* tr, Pos pos);
     
-    NodeType Type() const override { return NodeType::NodeNil; }
-    std::string String() const override { return "nil"; }
-    std::unique_ptr<Node> Copy() const override;
-    Pos Position() const override { return pos_; }
-    Tree* GetTree() const override { return tree_; }
-    void WriteTo(std::stringstream& ss) const override;
+    NodeType Type() const { return NodeNil; }
+    std::string String() const;
+    Node* Copy() const;
+    Tree* GetTree() const { return tree_; }
+    void WriteTo(std::stringstream& ss) const;
     
-public:
+private:
     Tree* tree_;
-    Pos pos_;
 };
 
 // 字段节点
@@ -185,42 +179,40 @@ class FieldNode : public Node {
 public:
     FieldNode(Tree* tr, Pos pos, const std::string& ident);
     
-    NodeType Type() const override { return NodeType::NodeField; }
-    std::string String() const override;
-    std::unique_ptr<Node> Copy() const override;
-    Pos Position() const override { return pos_; }
-    Tree* GetTree() const override { return tree_; }
-    void WriteTo(std::stringstream& ss) const override;
+    NodeType Type() const { return NodeField; }
+    std::string String() const;
+    Node* Copy() const;
+    Tree* GetTree() const { return tree_; }
+    void WriteTo(std::stringstream& ss) const;
     
-    const std::vector<std::string>& Ident() const { return ident_; }
+    const std::string& Ident() const { return ident_; }
     
-public:
+private:
     Tree* tree_;
-    Pos pos_;
-    std::vector<std::string> ident_; // 按词法顺序排列的标识符
+    std::string ident_;
 };
 
 // 链式节点
 class ChainNode : public Node {
 public:
-    ChainNode(Tree* tr, Pos pos, std::unique_ptr<Node> node);
+    ChainNode(Tree* tr, Pos pos, Node* node);
     
-    NodeType Type() const override { return NodeType::NodeChain; }
-    std::string String() const override;
-    std::unique_ptr<Node> Copy() const override;
-    Pos Position() const override { return pos_; }
-    Tree* GetTree() const override { return tree_; }
-    void WriteTo(std::stringstream& ss) const override;
+    NodeType Type() const { return NodeChain; }
+    std::string String() const;
+    Node* Copy() const;
+    Tree* GetTree() const { return tree_; }
+    void WriteTo(std::stringstream& ss) const;
     
-    void Add(const std::string& field);
-    const Node* GetNode() const { return node_.get(); }
-    const std::vector<std::string>& Field() const { return field_; }
+    Node* GetNode() const { return node_; }
     
-public:
+    // 添加字段方法和成员
+    void AddField(const std::string& field);
+    const std::vector<std::string>& Fields() const { return fields_; }
+    
+private:
     Tree* tree_;
-    Pos pos_;
-    std::unique_ptr<Node> node_;
-    std::vector<std::string> field_;
+    Node* node_;
+    std::vector<std::string> fields_; // 添加字段列表
 };
 
 // 布尔节点
@@ -228,18 +220,16 @@ class BoolNode : public Node {
 public:
     BoolNode(Tree* tr, Pos pos, bool value);
     
-    NodeType Type() const override { return NodeType::NodeBool; }
-    std::string String() const override;
-    std::unique_ptr<Node> Copy() const override;
-    Pos Position() const override { return pos_; }
-    Tree* GetTree() const override { return tree_; }
-    void WriteTo(std::stringstream& ss) const override;
+    NodeType Type() const { return NodeBool; }
+    std::string String() const;
+    Node* Copy() const;
+    Tree* GetTree() const { return tree_; }
+    void WriteTo(std::stringstream& ss) const;
     
     bool Value() const { return value_; }
     
-public:
+private:
     Tree* tree_;
-    Pos pos_;
     bool value_;
 };
 
@@ -248,34 +238,36 @@ class NumberNode : public Node {
 public:
     NumberNode(Tree* tr, Pos pos, const std::string& text);
     
-    NodeType Type() const override { return NodeType::NodeNumber; }
-    std::string String() const override { return text_; }
-    std::unique_ptr<Node> Copy() const override;
-    Pos Position() const override { return pos_; }
-    Tree* GetTree() const override { return tree_; }
-    void WriteTo(std::stringstream& ss) const override;
+    NodeType Type() const { return NodeNumber; }
+    std::string String() const;
+    Node* Copy() const;
+    Tree* GetTree() const { return tree_; }
+    void WriteTo(std::stringstream& ss) const;
     
     bool IsInt() const { return is_int_; }
     bool IsUint() const { return is_uint_; }
     bool IsFloat() const { return is_float_; }
     bool IsComplex() const { return is_complex_; }
-    int64_t Int64() const { return int64_; }
-    uint64_t Uint64() const { return uint64_; }
-    double Float64() const { return float64_; }
-    std::complex<double> Complex128() const { return complex128_; }
     
-public:
+    long Int64() const { return int64_; }
+    unsigned long Uint64() const { return uint64_; }
+    double Float64() const { return float64_; }
+    std::complex<double> Complex() const { return complex_; }
+    
+    const std::string& Text() const { return text_; }
+    
+private:
     Tree* tree_;
-    Pos pos_;
+    std::string text_;
     bool is_int_;
     bool is_uint_;
     bool is_float_;
     bool is_complex_;
-    int64_t int64_;
-    uint64_t uint64_;
+    
+    long int64_;
+    unsigned long uint64_;
     double float64_;
-    std::complex<double> complex128_;
-    std::string text_;
+    std::complex<double> complex_;
     
     void simplifyComplex();
 };
@@ -285,19 +277,17 @@ class StringNode : public Node {
 public:
     StringNode(Tree* tr, Pos pos, const std::string& quoted, const std::string& text);
     
-    NodeType Type() const override { return NodeType::NodeString; }
-    std::string String() const override { return quoted_; }
-    std::unique_ptr<Node> Copy() const override;
-    Pos Position() const override { return pos_; }
-    Tree* GetTree() const override { return tree_; }
-    void WriteTo(std::stringstream& ss) const override;
+    NodeType Type() const { return NodeString; }
+    std::string String() const;
+    Node* Copy() const;
+    Tree* GetTree() const { return tree_; }
+    void WriteTo(std::stringstream& ss) const;
     
     std::string Quoted() const { return quoted_; }
     std::string Text() const { return text_; }
     
-public:
+private:
     Tree* tree_;
-    Pos pos_;
     std::string quoted_; // 带引号的原始文本
     std::string text_;   // 经过引号处理的字符串
 };
@@ -307,16 +297,14 @@ class EndNode : public Node {
 public:
     EndNode(Tree* tr, Pos pos);
     
-    NodeType Type() const override { return NodeType::NodeEnd; }
-    std::string String() const override { return "{{end}}"; }
-    std::unique_ptr<Node> Copy() const override;
-    Pos Position() const override { return pos_; }
-    Tree* GetTree() const override { return tree_; }
-    void WriteTo(std::stringstream& ss) const override;
+    NodeType Type() const { return NodeEnd; }
+    std::string String() const;
+    Node* Copy() const;
+    Tree* GetTree() const { return tree_; }
+    void WriteTo(std::stringstream& ss) const;
     
-public:
+private:
     Tree* tree_;
-    Pos pos_;
 };
 
 // ElseNode表示{{else}}动作
@@ -324,41 +312,34 @@ class ElseNode : public Node {
 public:
     ElseNode(Tree* tr, Pos pos, int line);
     
-    NodeType Type() const override { return NodeType::NodeElse; }
-    std::string String() const override { return "{{else}}"; }
-    std::unique_ptr<Node> Copy() const override;
-    Pos Position() const override { return pos_; }
-    Tree* GetTree() const override { return tree_; }
-    void WriteTo(std::stringstream& ss) const override;
+    NodeType Type() const { return NodeElse; }
+    std::string String() const;
+    Node* Copy() const;
+    Tree* GetTree() const { return tree_; }
+    void WriteTo(std::stringstream& ss) const;
     
     int Line() const { return line_; }
     
-public:
+private:
     Tree* tree_;
-    Pos pos_;
     int line_;
 };
 
 // 标识符节点
 class IdentifierNode : public Node {
 public:
-    IdentifierNode(const std::string& ident);
     IdentifierNode(Tree* tr, Pos pos, const std::string& ident);
     
-    NodeType Type() const override { return NodeType::NodeIdentifier; }
-    std::string String() const override { return ident_; }
-    std::unique_ptr<Node> Copy() const override;
-    Pos Position() const override { return pos_; }
-    Tree* GetTree() const override { return tree_; }
-    void WriteTo(std::stringstream& ss) const override;
+    NodeType Type() const { return NodeIdentifier; }
+    std::string String() const;
+    Node* Copy() const;
+    Tree* GetTree() const { return tree_; }
+    void WriteTo(std::stringstream& ss) const;
     
-    IdentifierNode* SetPos(Pos pos);
-    IdentifierNode* SetTree(Tree* t);
-    std::string Ident() const { return ident_; }
+    const std::string& Ident() const { return ident_; }
     
-public:
+private:
     Tree* tree_;
-    Pos pos_;
     std::string ident_;
 };
 
@@ -367,20 +348,19 @@ class CommandNode : public Node {
 public:
     CommandNode(Tree* tr, Pos pos);
     
-    NodeType Type() const override { return NodeType::NodeCommand; }
-    std::string String() const override;
-    std::unique_ptr<Node> Copy() const override;
-    Pos Position() const override { return pos_; }
-    Tree* GetTree() const override { return tree_; }
-    void WriteTo(std::stringstream& ss) const override;
+    NodeType Type() const { return NodeCommand; }
+    std::string String() const;
+    Node* Copy() const;
+    Tree* GetTree() const { return tree_; }
+    void WriteTo(std::stringstream& ss) const;
     
-    void Append(std::unique_ptr<Node> arg);
-    const std::vector<std::unique_ptr<Node>>& Args() const { return args_; }
+    void Append(Node* arg);
     
-public:
+    const std::vector<Node*>& Args() const { return args_; }
+    
+private:
     Tree* tree_;
-    Pos pos_;
-    std::vector<std::unique_ptr<Node>> args_;
+    std::vector<Node*> args_;
 };
 
 // 管道节点
@@ -388,115 +368,110 @@ class PipeNode : public Node {
 public:
     PipeNode(Tree* tr, Pos pos, int line);
     
-    NodeType Type() const override { return NodeType::NodePipe; }
-    std::string String() const override;
-    std::unique_ptr<Node> Copy() const override;
-    Pos Position() const override { return pos_; }
-    Tree* GetTree() const override { return tree_; }
-    void WriteTo(std::stringstream& ss) const override;
+    NodeType Type() const { return NodePipe; }
+    std::string String() const;
+    Node* Copy() const;
+    Tree* GetTree() const { return tree_; }
+    void WriteTo(std::stringstream& ss) const;
     
-    void Append(std::unique_ptr<CommandNode> cmd);
-    void AddDecl(std::unique_ptr<VariableNode> v);
+    void Append(CommandNode* cmd);
+    
+    void AddDecl(VariableNode* v);
     
     int Line() const { return line_; }
     bool IsAssign() const { return is_assign_; }
     void SetIsAssign(bool is_assign) { is_assign_ = is_assign; }
-    const std::vector<std::unique_ptr<VariableNode>>& Decl() const { return decl_; }
-    const std::vector<std::unique_ptr<CommandNode>>& Cmds() const { return cmds_; }
+    const std::vector<VariableNode*>& Decl() const { return decl_; }
+    const std::vector<CommandNode*>& Cmds() const { return cmds_; }
     
-public:
+private:
     Tree* tree_;
-    Pos pos_;
     int line_;
-    bool is_assign_ = false;
-    std::vector<std::unique_ptr<VariableNode>> decl_;
-    std::vector<std::unique_ptr<CommandNode>> cmds_;
+    bool is_assign_;
+    std::vector<VariableNode*> decl_;
+    std::vector<CommandNode*> cmds_;
 };
 
 // 动作节点
 class ActionNode : public Node {
 public:
-    ActionNode(Tree* tr, Pos pos, int line, std::unique_ptr<PipeNode> pipe);
+    ActionNode(Tree* tr, Pos pos, int line, PipeNode* pipe);
     
-    NodeType Type() const override { return NodeType::NodeAction; }
-    std::string String() const override;
-    std::unique_ptr<Node> Copy() const override;
-    Pos Position() const override { return pos_; }
-    Tree* GetTree() const override { return tree_; }
-    void WriteTo(std::stringstream& ss) const override;
+    NodeType Type() const { return NodeAction; }
+    std::string String() const;
+    Node* Copy() const;
+    Tree* GetTree() const { return tree_; }
+    void WriteTo(std::stringstream& ss) const;
     
     int Line() const { return line_; }
-    const PipeNode* Pipe() const { return pipe_.get(); }
+    const PipeNode* Pipe() const { return pipe_; }
     
-public:
+private:
     Tree* tree_;
-    Pos pos_;
     int line_;
-    std::unique_ptr<PipeNode> pipe_;
+    PipeNode* pipe_;
 };
 
 // 分支节点基类
 class BranchNode : public Node {
 public:
     BranchNode(Tree* tr, NodeType type, Pos pos, int line, 
-               std::unique_ptr<PipeNode> pipe, 
-               std::unique_ptr<ListNode> list, 
-               std::unique_ptr<ListNode> else_list);
+               PipeNode* pipe, 
+               ListNode* list, 
+               ListNode* else_list);
     
-    std::string String() const override;
-    Pos Position() const override { return pos_; }
-    Tree* GetTree() const override { return tree_; }
-    void WriteTo(std::stringstream& ss) const override;
+    std::string String() const;
+    Tree* GetTree() const { return tree_; }
+    void WriteTo(std::stringstream& ss) const;
     
     int Line() const { return line_; }
-    const PipeNode* GetPipe() const { return pipe_.get(); }
-    const ListNode* List() const { return list_.get(); }
-    const ListNode* ElseList() const { return else_list_.get(); }
+    const PipeNode* GetPipe() const { return pipe_; }
+    const ListNode* List() const { return list_; }
+    const ListNode* ElseList() const { return else_list_; }
     
-public:
+protected:
     Tree* tree_;
     NodeType node_type_;
-    Pos pos_;
     int line_;
-    std::unique_ptr<PipeNode> pipe_;
-    std::unique_ptr<ListNode> list_;
-    std::unique_ptr<ListNode> else_list_;
+    PipeNode* pipe_;
+    ListNode* list_;
+    ListNode* else_list_;
 };
 
 // If节点
 class IfNode : public BranchNode {
 public:
     IfNode(Tree* tr, Pos pos, int line, 
-           std::unique_ptr<PipeNode> pipe, 
-           std::unique_ptr<ListNode> list, 
-           std::unique_ptr<ListNode> else_list);
+           PipeNode* pipe, 
+           ListNode* list, 
+           ListNode* else_list);
     
-    NodeType Type() const override { return NodeType::NodeIf; }
-    std::unique_ptr<Node> Copy() const override;
+    NodeType Type() const { return NodeIf; }
+    Node* Copy() const;
 };
 
 // Range节点
 class RangeNode : public BranchNode {
 public:
     RangeNode(Tree* tr, Pos pos, int line, 
-              std::unique_ptr<PipeNode> pipe, 
-              std::unique_ptr<ListNode> list, 
-              std::unique_ptr<ListNode> else_list);
+              PipeNode* pipe, 
+              ListNode* list, 
+              ListNode* else_list);
     
-    NodeType Type() const override { return NodeType::NodeRange; }
-    std::unique_ptr<Node> Copy() const override;
+    NodeType Type() const { return NodeRange; }
+    Node* Copy() const;
 };
 
 // With节点
 class WithNode : public BranchNode {
 public:
     WithNode(Tree* tr, Pos pos, int line, 
-             std::unique_ptr<PipeNode> pipe, 
-             std::unique_ptr<ListNode> list, 
-             std::unique_ptr<ListNode> else_list);
+             PipeNode* pipe, 
+             ListNode* list, 
+             ListNode* else_list);
     
-    NodeType Type() const override { return NodeType::NodeWith; }
-    std::unique_ptr<Node> Copy() const override;
+    NodeType Type() const { return NodeWith; }
+    Node* Copy() const;
 };
 
 // Break节点
@@ -504,18 +479,16 @@ class BreakNode : public Node {
 public:
     BreakNode(Tree* tr, Pos pos, int line);
     
-    NodeType Type() const override { return NodeType::NodeBreak; }
-    std::string String() const override { return "{{break}}"; }
-    std::unique_ptr<Node> Copy() const override;
-    Pos Position() const override { return pos_; }
-    Tree* GetTree() const override { return tree_; }
-    void WriteTo(std::stringstream& ss) const override;
+    NodeType Type() const { return NodeBreak; }
+    std::string String() const;
+    Node* Copy() const;
+    Tree* GetTree() const { return tree_; }
+    void WriteTo(std::stringstream& ss) const;
     
     int Line() const { return line_; }
     
-public:
+private:
     Tree* tree_;
-    Pos pos_;
     int line_;
 };
 
@@ -524,18 +497,16 @@ class ContinueNode : public Node {
 public:
     ContinueNode(Tree* tr, Pos pos, int line);
     
-    NodeType Type() const override { return NodeType::NodeContinue; }
-    std::string String() const override { return "{{continue}}"; }
-    std::unique_ptr<Node> Copy() const override;
-    Pos Position() const override { return pos_; }
-    Tree* GetTree() const override { return tree_; }
-    void WriteTo(std::stringstream& ss) const override;
+    NodeType Type() const { return NodeContinue; }
+    std::string String() const;
+    Node* Copy() const;
+    Tree* GetTree() const { return tree_; }
+    void WriteTo(std::stringstream& ss) const;
     
     int Line() const { return line_; }
     
-public:
+private:
     Tree* tree_;
-    Pos pos_;
     int line_;
 };
 
@@ -544,25 +515,23 @@ class TemplateNode : public Node {
 public:
     TemplateNode(Tree* tr, Pos pos, int line, 
                  const std::string& name, 
-                 std::unique_ptr<PipeNode> pipe);
+                 PipeNode* pipe);
     
-    NodeType Type() const override { return NodeType::NodeTemplate; }
-    std::string String() const override;
-    std::unique_ptr<Node> Copy() const override;
-    Pos Position() const override { return pos_; }
-    Tree* GetTree() const override { return tree_; }
-    void WriteTo(std::stringstream& ss) const override;
+    NodeType Type() const { return NodeTemplate; }
+    std::string String() const;
+    Node* Copy() const;
+    Tree* GetTree() const { return tree_; }
+    void WriteTo(std::stringstream& ss) const;
     
     int Line() const { return line_; }
     std::string Name() const { return name_; }
-    const PipeNode* Pipe() const { return pipe_.get(); }
+    const PipeNode* Pipe() const { return pipe_; }
     
-public:
+private:
     Tree* tree_;
-    Pos pos_;
     int line_;
     std::string name_;
-    std::unique_ptr<PipeNode> pipe_;
+    PipeNode* pipe_;
 };
 
 // 工具函数：检查树是否为空
