@@ -1,0 +1,27 @@
+appName: nginx-demo
+containerName: nginx
+image: "nginx:1.25"
+replicaCount: 3
+useHighReplicas: false # For complex condition demo
+service:
+  enabled: true # For if demo
+  type: ClusterIP
+  port: 8080
+  containerPort: 8080 # Moved port here for with demo
+  annotations: {}
+resources:
+  enabled: true # For if demo
+  limits:
+    cpu: "500m"
+    memory: "256Mi"
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+env: # Uncommented to test range logic
+  - name: ENV
+    value: "production"
+  - name: LOG_LEVEL
+    value: "info"
+deploymentInfo: # For with demo
+  author: "xdu"
+  version: "1.0"

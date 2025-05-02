@@ -650,6 +650,27 @@ static std::vector<SimpleYamlLine> ParseSimpleYamlLines(const std::vector<std::s
                 if (!value.empty() && value[0] == ' ') value = value.substr(1);
             }
         }
+        
+        // --- 新增：去除 value 末尾的注释 --- 
+        size_t commentPos = value.find('#');
+        if (commentPos != std::string::npos) {
+            // 检查 # 是否在引号内（非常简化的检查，仅处理结尾引号）
+            bool inQuotes = (!value.empty() && value[0] == '"' && value[value.size()-1] == '"') ||
+                            (!value.empty() && value[0] == '\'' && value[value.size()-1] == '\'');
+            if (!inQuotes) { // 如果不在引号内（或无法判断引号），则去除注释
+                 value = value.substr(0, commentPos);
+            }
+        }
+        // 去除 value 末尾可能存在的空格
+        size_t endPos = value.find_last_not_of(" \t");
+        if (endPos != std::string::npos) {
+            value = value.substr(0, endPos + 1);
+        } else if (value.find_first_of(" \t") == 0 && value.length() > 0) {
+             // 如果原始值全是空格，则置空
+             value = "";
+        }
+        // --- 结束注释去除 --- 
+        
         SimpleYamlLine yl;
         yl.indent = indent;
         yl.isListItem = isListItem;

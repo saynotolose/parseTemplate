@@ -52,7 +52,7 @@ bool ValidateChartStructure(const std::string& chartPath, std::vector<std::strin
         errors.push_back("错误: 必需目录 'templates' 在 '" + chartPath + "' 中未找到或不是一个目录。");
         isValid = false;
     } else {
-        // 新增检查：templates 目录必须包含至少一个 .yaml 或 .yml 文件
+        // 检查：templates 目录必须包含至少一个 .yaml 或 .yml 文件
         bool foundYaml = false;
         DIR* tplDir = opendir(templatesPath.c_str());
         if (!tplDir) {

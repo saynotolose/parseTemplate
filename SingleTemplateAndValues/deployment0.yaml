@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.appName }}
+  {{ with .Values.deploymentInfo }}
+  annotations:
+    author: {{ .author }}
+    version: {{ .version }}
+  {{ end }}
+spec:
+  {{ if and .Values.service.enabled (gt .Values.replicaCount 1) (not .Values.useHighReplicas) }}
+  replicas: 2
+  {{ else }}
+  replicas: {{ .Values.replicaCount }}
+  {{ end }}
+  selector:
+    matchLabels:
+      app: {{ .Values.appName }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.appName }}
+    spec:
+      containers:
+        - name: {{ .Values.containerName }}
+          image: {{ .Values.image | default "nginx:stable" }}
+          {{ if .Values.service.enabled }}
+          {{ with .Values.service }}
+          ports:
+            - containerPort: {{ .containerPort }}
+          {{ end }}
+          {{ else }}
+          # If service is not enabled, this block is rendered (empty)
+          {{ end }}
+          {{ if .Values.resources.enabled }}
+          {{ with .Values.resources }}
+          resources:
+            limits:
+              cpu: {{ .limits.cpu }}
+              memory: {{ .limits.memory }}
+            requests:
+              cpu: {{ .requests.cpu }}
+              memory: {{ .requests.memory }}
+          {{ end }}
+          {{ end }}
+          env:
+          {{ range .Values.env }}
+            - name: {{ .name }}
+              value: {{ .value }}
+          {{ else }}
+            - name: NO_ENV_DEFINED
+              value: "true"
+          {{ end }}
