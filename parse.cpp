@@ -854,19 +854,6 @@ Node* Tree::operand() {
     }
 }
 
-// 创建变量节点
-// VariableNode* Tree::newVariable(Pos pos, const std::string& ident) {
-//     return new VariableNode(this, pos, ident);
-// }
 
-// 创建标识符节点
-// IdentifierNode* Tree::newIdentifier(Pos pos, const std::string& ident) {
-//     return new IdentifierNode(this, pos, ident);
-// }
-
-// 创建点节点
-// DotNode* Tree::newDot(Pos pos) {
-//     return new DotNode(this, pos);
-// }
 
 

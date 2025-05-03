@@ -483,14 +483,6 @@ Values* Values::FromYAMLFile(const std::string& filename) {
     return FromYAML(buffer.str());
 }
 
-
-
-
-
-
-
-
-
 // 合并值
 Values* CoalesceValues(const Values* base, const Values* overlay) {
     if (!base) {
@@ -542,15 +534,6 @@ Values* CoalesceValues(const Values* base, const Values* overlay) {
     
     return Values::MakeMap(result);
 }
-
-
-
-
-
-
-
-
-
 
 // 准备渲染值
 Values* ToRenderValues(

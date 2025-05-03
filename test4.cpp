@@ -1,69 +1,122 @@
-#include "chart_processor.h" // 包含 Chart 处理器的头文件
-#include <iostream>          // C++98 IO
-#include <map>               // C++98 map
-#include <vector>            // C++98 vector
-#include <string>            // C++98 string
+#include "chart_processor.h" 
+#include "template_linter.h"   
+#include "template_syntax_checker.h" 
+#include <iostream>          
+#include <map>               
+#include <vector>            
+#include <string>            
 
-int main() {
-    // --- 配置测试 Chart 路径 ---
-    // 重要: 请将下面的路径修改为您实际包含主 Chart 和子 Chart 的测试目录路径。
-    // 建议使用相对路径 (相对于可执行文件的运行位置)。
-    // 例如，如果可执行文件在项目根目录，测试 Chart 在 "./test_data/chart_with_subchart/"
-    // 注意：下面的 Windows 路径是为了解决编译错误，但在 Linux 上运行时无法访问。
-    // 请确保将其替换为指向您测试 Chart 的有效 Linux 路径！
-    std::string chartToTestPath = "C:\\Users\\oykk\\Desktop\\project\\myapp\\myapp"; 
-    // ---------------------------
-
-    std::cout << "开始测试 Chart 处理: " << chartToTestPath << std::endl;
+// --- Chart 渲染 ---
+bool runChartProcessing(const std::string& chartPath) {
+    std::cout << "\n=== 开始测试 Chart 渲染: " << chartPath << " ===" << std::endl;
 
     // 用于存储渲染结果和错误的容器
     std::map<std::string, std::string> renderedOutputs;
     std::vector<std::string> processingErrors;
 
-    // 调用 Chart 处理函数
+    // 调用 Chart 渲染函数
     bool success = chart_processor::ProcessChartTemplates(
-        chartToTestPath,
+        chartPath,
         renderedOutputs,
         processingErrors
     );
 
-    // 打印处理结果
-    std::cout << "\n--- 处理结果 ---" << std::endl;
+    // 打印渲染结果
+    std::cout << "\n--- Chart 渲染结果 ---" << std::endl;
     if (success) {
-        std::cout << "Chart 处理流程完成 (可能包含个别模板渲染错误)。" << std::endl;
+        std::cout << "Chart 渲染流程完成" << std::endl;
     } else {
-        std::cerr << "Chart 处理过程中发生严重错误！" << std::endl;
+        std::cerr << "Chart 渲染过程中发生严重错误！" << std::endl;
     }
 
     // 打印渲染的模板内容
     std::cout << "\n--- 渲染的模板 --- (" << renderedOutputs.size() << " 个文件)" << std::endl;
-    std::map<std::string, std::string>::const_iterator it;
-    for (it = renderedOutputs.begin(); it != renderedOutputs.end(); ++it) {
-        std::cout << "\n--- 文件: " << it->first << " ---\n";
-        std::cout << it->second; // 渲染结果
-        std::cout << "\n--- 文件结束: " << it->first << " ---\n";
+    std::map<std::string, std::string>::const_iterator it_render;
+    for (it_render = renderedOutputs.begin(); it_render != renderedOutputs.end(); ++it_render) {
+        std::cout << "\n--- 文件: " << it_render->first << " ---\n";
+        std::cout << it_render->second; // 渲染结果
+        std::cout << "\n--- 文件结束: " << it_render->first << " ---\n";
     }
 
-    // 打印处理过程中的错误或警告
+    // 打印渲染过程中的错误或警告
     if (!processingErrors.empty()) {
-        std::cerr << "\n--- 处理过程中的错误/警告 --- (" << processingErrors.size() << " 条)" << std::endl;
+        std::cerr << "\n--- Chart 渲染错误/警告 --- (" << processingErrors.size() << " 条)" << std::endl;
         for (size_t i = 0; i < processingErrors.size(); ++i) {
             std::cerr << "- " << processingErrors[i] << std::endl;
         }
     } else {
-        std::cout << "\n--- 处理过程中无错误/警告 ---" << std::endl;
+        std::cout << "\n--- Chart 渲染无错误/警告 ---" << std::endl;
     }
 
-    // 根据是否有严重错误返回状态码
-    bool hadFatalError = !success; // 如果 ProcessChartTemplates 返回 false，则为严重错误
+     // 确定是否有严重错误
+     bool hadFatalError = !success;
      for (size_t i = 0; i < processingErrors.size(); ++i) {
-         // 如果错误信息以 "错误:" 开头，也认为是严重错误
          if (processingErrors[i].rfind("错误:", 0) == 0) {
              hadFatalError = true;
              break;
          }
      }
+     std::cout << "\nChart 渲染测试结束。" << (hadFatalError ? "状态：失败" : "状态：成功") << std::endl;
+    return !hadFatalError; // 返回成功状态
+}
 
-    std::cout << "\n测试完成。" << std::endl;
-    return hadFatalError ? 1 : 0; // 失败返回 1，成功返回 0
+// --- Chart语法检查 ---
+bool runTemplateLinting(const std::string& chartPath) {
+    std::cout << "\n=== 开始Chart语法校验: " << chartPath << " ===" << std::endl;
+
+    std::map<std::string, std::vector<template_engine::TemplateSyntaxError> > lintErrors;
+
+    bool success = template_linter::LintChartTemplates(chartPath, lintErrors);
+
+    // 打印结果
+    std::cout << "\n--- Chart包校验结果 ---" << std::endl;
+    if (success) {
+        std::cout << "No syntax errors found in templates." << std::endl;
+    } else {
+        std::cerr << "Syntax errors found in the following templates:" << std::endl;
+        std::map<std::string, std::vector<template_engine::TemplateSyntaxError> >::const_iterator it_lint;
+        for (it_lint = lintErrors.begin(); it_lint != lintErrors.end(); ++it_lint) {
+            const std::string& templatePath = it_lint->first;
+            const std::vector<template_engine::TemplateSyntaxError>& errors = it_lint->second;
+
+            std::cerr << "\n=== Errors in: " << templatePath << " ===" << std::endl;
+            for (size_t i = 0; i < errors.size(); ++i) {
+                std::cerr << "- Line " << errors[i].line << ": " << errors[i].message << std::endl;
+                 if (!errors[i].context.empty()) {
+                     std::cerr << "    Context: " << errors[i].context << std::endl;
+                 }
+            }
+        }
+    }
+    std::cout << "\n Chart包校验结束。" << (success ? "状态：成功" : "状态：失败") << std::endl;
+    return success;
+}
+
+int main() {
+    // --- 配置测试 Chart 路径 ---
+    // 请将此路径修改为您要测试的 Chart 路径
+    std::string chartToTestPath = "C:\\Users\\oykk\\Desktop\\project\\myapp\\myapp";
+    // std::string chartToTestPath = "SingleTemplateAndValues"; // 备用路径
+    // ---------------------------
+
+    std::cout << "********** 开始 **********" << std::endl;
+
+    // Chart 语法检查测试
+    bool lintSuccess = runTemplateLinting(chartToTestPath);
+    std::cout << "Chart 语法校验最终状态: " << (lintSuccess ? "成功" : "失败") << std::endl;
+
+
+    // Chart 渲染测试
+    bool processSuccess = runChartProcessing(chartToTestPath);
+    std::cout << "Chart 渲染最终状态: " << (processSuccess ? "成功" : "失败") << std::endl;
+
+
+    std::cout << "\n********** 结束 **********" << std::endl;
+    
+
+    // return lintSuccess ? 0 : 1;
+    // return processSuccess ? 0 : 1;
+    return (lintSuccess && processSuccess) ? 0 : 1;
+
+
 } 
